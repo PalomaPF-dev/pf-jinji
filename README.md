@@ -85,7 +85,10 @@ npm run build
 1. `/setup` で責任者を登録
 2. `/org/edit` でポータルの部署を同期し、本部→部→課→係の階層を組む
 3. `/employees/import` で社員をCSV取込（ポータル連携が未整備でもここだけで始められる）
+   - 試すだけなら [docs/sample-employees.csv](docs/sample-employees.csv) をそのまま取り込める
+     （所属コードはポータル既定の D001・D002・D003・F001・W001 を使っている）
 4. 以後の所属・役職の変更は `/transfers` の異動申請書から行う（履歴が残る）
+5. `/settings` の「ポータル連携」で、人事情報をポータルへ送る
 
 ## ポータル連携
 
