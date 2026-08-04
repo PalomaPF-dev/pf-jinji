@@ -43,7 +43,7 @@ export function hashResetToken(token: string): string {
 
 /** リンクの base URL（NEXTAUTH_URL 優先・末尾スラッシュは除去）。 */
 export function resetLinkBase(): string {
-  const base = process.env.NEXTAUTH_URL || "https://jinji.paloma.co.jp";
+  const base = process.env.NEXTAUTH_URL || "https://jinji.paloma-pf.com";
   return base.replace(/\/+$/, "");
 }
 

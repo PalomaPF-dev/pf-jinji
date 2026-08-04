@@ -56,13 +56,12 @@ SSO・権限の枠組みと連動する。
 
 ## 公開URL
 
-本番は **https://jinji.paloma.co.jp**（他のPFアプリは `*.paloma-pf.com` だが、
-本アプリは社内向けの人事情報を扱うため別ドメインで運用する）。
+本番は **https://jinji.paloma-pf.com**。他のPFアプリと同じ `paloma-pf.com` ゾーンに置く。
 
-ポータルからのSSOはドメインを跨ぐが、`/api/sso` へのトップレベル遷移で
-このドメイン自身にセッションクッキーを発行するため、そのまま動作する。
-Vercel 側でドメインを割り当てたうえで、`NEXTAUTH_URL` を同じURLにすること
-（パスワード設定リンクの生成にも使うため）。
+ポータル（`portal.paloma-pf.com`）とはホストが違うためクッキーは共有されないが、
+`/api/sso` へのトップレベル遷移でこのホスト自身にセッションクッキーを発行するので、
+SSOはそのまま動作する。Vercel 側でドメインを割り当てたうえで、`NEXTAUTH_URL` を
+同じURLにすること（パスワード設定リンクの生成にも使うため）。
 
 本番へ出す手順は [docs/deploy.md](docs/deploy.md) にまとめてある。
 
@@ -144,7 +143,7 @@ npm run build
 | ファイル | 変更内容 |
 |---|---|
 | `lib/db.js` | `ALL_APP_KEYS` に `"jinji"` |
-| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma.co.jp"` |
+| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma-pf.com"` |
 | `lib/provision.js` | `PROVISION_APP_KEYS` に `"jinji"` |
 | `api/user.js` | `SSO_APP_KEYS` に `"jinji"` |
 | `index.html` / `admin.html` | `APPS` にタイル定義、`SSO_APPS` に追加 |

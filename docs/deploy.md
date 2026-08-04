@@ -1,6 +1,6 @@
 # デプロイ手順（Vercel）
 
-本番は **https://jinji.paloma.co.jp**。他のPFアプリ（`*.paloma-pf.com`）とは別ドメインで運用する。
+本番は **https://jinji.paloma-pf.com**。他のPFアプリと同じ `paloma-pf.com` ゾーンに置く。
 
 以下は上から順に実施する。所要 15〜20 分程度。
 
@@ -45,7 +45,7 @@ Vercel の Settings → Environment Variables で、**Production / Preview の�
 | 変数 | 値 | 必須 |
 |---|---|---|
 | `DATABASE_URL` | 手順1の Neon 接続文字列 | ● |
-| `NEXTAUTH_URL` | `https://jinji.paloma.co.jp` | ● |
+| `NEXTAUTH_URL` | `https://jinji.paloma-pf.com` | ● |
 | `NEXTAUTH_SECRET` | `openssl rand -base64 32` の出力 | ● |
 | `PF_PROVISION_KEY` | **ポータルと同じ値**（既存のPFアプリの環境変数からコピー） | ポータル連携時 |
 | `PORTAL_BASE_URL` | `https://portal.paloma-pf.com` | 既定値と同じなら省略可 |
@@ -66,12 +66,12 @@ Vercel の Settings → Environment Variables で、**Production / Preview の�
 
 ## 4. ドメインを割り当てる
 
-1. Vercel の Settings → Domains に `jinji.paloma.co.jp` を追加
-2. 表示された DNS レコードを `paloma.co.jp` のゾーンに登録する
+1. Vercel の Settings → Domains に `jinji.paloma-pf.com` を追加
+2. 表示された DNS レコードを `paloma-pf.com` のゾーンに登録する
    （サブドメインなので通常は `jinji` の CNAME → `cname.vercel-dns.com`）
 3. 証明書が発行され、Valid になるまで待つ
 
-`paloma.co.jp` は `paloma-pf.com` と別ゾーンなので、DNS の管理者が異なる場合がある。
+他のPFアプリと同じゾーンなので、`tenchu` や `hoju` を追加したときと同じ手順になる。
 
 ---
 
@@ -82,7 +82,7 @@ Vercel の Settings → Environment Variables で、**Production / Preview の�
 | ファイル | 内容 |
 |---|---|
 | `lib/db.js` | `ALL_APP_KEYS` に `"jinji"` |
-| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma.co.jp"` |
+| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma-pf.com"` |
 | `lib/provision.js` | `PROVISION_APP_KEYS` に `"jinji"` |
 | `api/user.js` | `SSO_APP_KEYS` に `"jinji"` |
 | `index.html` / `admin.html` | `APPS` のタイル定義と `SSO_APPS` |
@@ -96,7 +96,7 @@ Vercel の Settings → Environment Variables で、**Production / Preview の�
 
 ## 6. 動作確認
 
-1. `https://jinji.paloma.co.jp/` を開く → 名簿が空なら `/setup` に誘導される
+1. `https://jinji.paloma-pf.com/` を開く → 名簿が空なら `/setup` に誘導される
    （`JINJI_BOOTSTRAP_ADMIN_IDS` を設定した場合はその社員番号が owner 済み）
 2. `/setup` で責任者を登録し、ログインできることを確認
 3. `/org/edit` の「ポータルから同期」で部署・職場が取り込まれる
