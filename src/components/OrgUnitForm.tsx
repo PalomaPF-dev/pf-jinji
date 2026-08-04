@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import SubmitButton from "./SubmitButton";
 import { createOrgUnitAction, updateOrgUnitAction, type OrgActionState } from "@/app/org/actions";
+import { pick } from "@/lib/formState";
 import { ORG_KIND_LABEL, ORG_KIND_ORDER, type OrgUnit } from "@/lib/types";
 
 const INPUT =
@@ -38,6 +39,9 @@ export default function OrgUnitForm({
     unit ? updateOrgUnitAction : createOrgUnitAction,
     {} as OrgActionState,
   );
+  // React 19 はアクション完了時にフォームを自動リセットするため、
+  // エラーで戻ってきたときは送信値を defaultValue に反映して入力を復元する。
+  const v = state.values;
 
   return (
     <form action={formAction} className="rounded-xl border border-[#e5e5e5] bg-white p-5">
@@ -51,20 +55,26 @@ export default function OrgUnitForm({
           <label htmlFor="code" className="mb-1 block text-sm font-medium text-[#555555]">
             組織コード *
           </label>
-          <input id="code" name="code" required defaultValue={unit?.code ?? ""} className={INPUT} />
+          <input id="code" name="code" required defaultValue={pick(v, "code", unit?.code)} className={INPUT} />
           <p className="mt-1 text-xs text-[#909090]">CSV取込の「所属コード」に使います。</p>
         </div>
         <div>
           <label htmlFor="name" className="mb-1 block text-sm font-medium text-[#555555]">
             組織名 *
           </label>
-          <input id="name" name="name" required defaultValue={unit?.name ?? ""} className={INPUT} />
+          <input id="name" name="name" required defaultValue={pick(v, "name", unit?.name)} className={INPUT} />
         </div>
         <div>
           <label htmlFor="kind" className="mb-1 block text-sm font-medium text-[#555555]">
             階層区分
           </label>
-          <select id="kind" name="kind" defaultValue={unit?.kind ?? "ka"} className={INPUT}>
+          <select
+            id="kind"
+            name="kind"
+            key={`kind-${v?.kind ?? ""}`}
+            defaultValue={v?.kind ?? unit?.kind ?? "ka"}
+            className={INPUT}
+          >
             {ORG_KIND_ORDER.map((k) => (
               <option key={k} value={k}>
                 {ORG_KIND_LABEL[k]}
@@ -76,7 +86,13 @@ export default function OrgUnitForm({
           <label htmlFor="parentId" className="mb-1 block text-sm font-medium text-[#555555]">
             上位組織
           </label>
-          <select id="parentId" name="parentId" defaultValue={unit?.parentId ?? ""} className={INPUT}>
+          <select
+            id="parentId"
+            name="parentId"
+            key={`parent-${v?.parentId ?? ""}`}
+            defaultValue={v?.parentId ?? unit?.parentId ?? ""}
+            className={INPUT}
+          >
             <option value="">（最上位）</option>
             {parentOptions
               .filter((o) => o.id !== unit?.id)
@@ -95,7 +111,8 @@ export default function OrgUnitForm({
           <select
             id="headEmployeeId"
             name="headEmployeeId"
-            defaultValue={unit?.headEmployeeId ?? ""}
+            key={`head-${v?.headEmployeeId ?? ""}`}
+            defaultValue={v?.headEmployeeId ?? unit?.headEmployeeId ?? ""}
             className={INPUT}
           >
             <option value="">—</option>
@@ -114,7 +131,7 @@ export default function OrgUnitForm({
             id="sort"
             name="sort"
             type="number"
-            defaultValue={unit?.sort ?? 0}
+            defaultValue={v?.sort ?? String(unit?.sort ?? 0)}
             className={INPUT}
           />
           <p className="mt-1 text-xs text-[#909090]">同じ階層の中で小さい順に並びます。</p>
@@ -127,7 +144,7 @@ export default function OrgUnitForm({
             id="validFrom"
             name="validFrom"
             type="date"
-            defaultValue={unit?.validFrom ?? ""}
+            defaultValue={pick(v, "validFrom", unit?.validFrom)}
             className={INPUT}
           />
         </div>
@@ -139,7 +156,7 @@ export default function OrgUnitForm({
             id="validTo"
             name="validTo"
             type="date"
-            defaultValue={unit?.validTo ?? ""}
+            defaultValue={pick(v, "validTo", unit?.validTo)}
             className={INPUT}
           />
           <p className="mt-1 text-xs text-[#909090]">
@@ -153,7 +170,7 @@ export default function OrgUnitForm({
           <input
             id="description"
             name="description"
-            defaultValue={unit?.description ?? ""}
+            defaultValue={pick(v, "description", unit?.description)}
             className={INPUT}
           />
         </div>

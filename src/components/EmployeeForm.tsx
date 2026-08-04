@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import SubmitButton from "./SubmitButton";
 import type { ActionState } from "@/app/employees/actions";
+import { pick } from "@/lib/formState";
 import {
   EMPLOYMENT_STATUS_LABEL,
   EMPLOYMENT_STATUS_ORDER,
@@ -56,6 +57,9 @@ export default function EmployeeForm({
   orgOptions: OrgOption[];
 }) {
   const [state, formAction] = useActionState(action, {} as ActionState);
+  // React 19 はアクション完了時にフォームを自動リセットするため、
+  // エラーで戻ってきたときは送信値を defaultValue に反映して入力を復元する。
+  const v = state.values;
 
   return (
     <form action={formAction} className="space-y-6">
@@ -69,18 +73,24 @@ export default function EmployeeForm({
               id="employeeNo"
               name="employeeNo"
               required
-              defaultValue={employee?.employeeNo ?? ""}
+              defaultValue={pick(v, "employeeNo", employee?.employeeNo)}
               className={INPUT}
             />
           </Field>
           <Field label="氏名 *" htmlFor="name">
-            <input id="name" name="name" required defaultValue={employee?.name ?? ""} className={INPUT} />
+            <input id="name" name="name" required defaultValue={pick(v, "name", employee?.name)} className={INPUT} />
           </Field>
           <Field label="カナ" htmlFor="nameKana" hint="一覧の並び順に使います。">
-            <input id="nameKana" name="nameKana" defaultValue={employee?.nameKana ?? ""} className={INPUT} />
+            <input id="nameKana" name="nameKana" defaultValue={pick(v, "nameKana", employee?.nameKana)} className={INPUT} />
           </Field>
           <Field label="性別" htmlFor="gender">
-            <select id="gender" name="gender" defaultValue={employee?.gender ?? ""} className={INPUT}>
+            <select
+              id="gender"
+              name="gender"
+              key={`gender-${v?.gender ?? ""}`}
+              defaultValue={v?.gender ?? employee?.gender ?? ""}
+              className={INPUT}
+            >
               <option value="">—</option>
               {(Object.keys(GENDER_LABEL) as (keyof typeof GENDER_LABEL)[]).map((g) => (
                 <option key={g} value={g}>
@@ -94,7 +104,7 @@ export default function EmployeeForm({
               id="birthDate"
               name="birthDate"
               type="date"
-              defaultValue={employee?.birthDate ?? ""}
+              defaultValue={pick(v, "birthDate", employee?.birthDate)}
               className={INPUT}
             />
           </Field>
@@ -103,7 +113,7 @@ export default function EmployeeForm({
               id="hireDate"
               name="hireDate"
               type="date"
-              defaultValue={employee?.hireDate ?? ""}
+              defaultValue={pick(v, "hireDate", employee?.hireDate)}
               className={INPUT}
             />
           </Field>
@@ -114,7 +124,13 @@ export default function EmployeeForm({
         <h2 className="mb-4 text-sm font-bold text-[#333333]">所属・処遇</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="所属" htmlFor="orgUnitId" hint="異動は「異動申請書」から行うと履歴が残ります。">
-            <select id="orgUnitId" name="orgUnitId" defaultValue={employee?.orgUnitId ?? ""} className={INPUT}>
+            <select
+              id="orgUnitId"
+              name="orgUnitId"
+              key={`org-${v?.orgUnitId ?? ""}`}
+              defaultValue={v?.orgUnitId ?? employee?.orgUnitId ?? ""}
+              className={INPUT}
+            >
               <option value="">（未配置）</option>
               {orgOptions.map((o) => (
                 <option key={o.id} value={o.id}>
@@ -129,7 +145,7 @@ export default function EmployeeForm({
               id="employmentType"
               name="employmentType"
               list="employment-types"
-              defaultValue={employee?.employmentType ?? ""}
+              defaultValue={pick(v, "employmentType", employee?.employmentType)}
               className={INPUT}
             />
             <datalist id="employment-types">
@@ -142,18 +158,24 @@ export default function EmployeeForm({
             <input
               id="positionName"
               name="positionName"
-              defaultValue={employee?.positionName ?? ""}
+              defaultValue={pick(v, "positionName", employee?.positionName)}
               className={INPUT}
             />
           </Field>
           <Field label="職務" htmlFor="dutyName">
-            <input id="dutyName" name="dutyName" defaultValue={employee?.dutyName ?? ""} className={INPUT} />
+            <input id="dutyName" name="dutyName" defaultValue={pick(v, "dutyName", employee?.dutyName)} className={INPUT} />
           </Field>
           <Field label="等級" htmlFor="grade">
-            <input id="grade" name="grade" defaultValue={employee?.grade ?? ""} className={INPUT} />
+            <input id="grade" name="grade" defaultValue={pick(v, "grade", employee?.grade)} className={INPUT} />
           </Field>
           <Field label="在籍状態 *" htmlFor="status">
-            <select id="status" name="status" defaultValue={employee?.status ?? "active"} className={INPUT}>
+            <select
+              id="status"
+              name="status"
+              key={`status-${v?.status ?? ""}`}
+              defaultValue={v?.status ?? employee?.status ?? "active"}
+              className={INPUT}
+            >
               {EMPLOYMENT_STATUS_ORDER.map((s) => (
                 <option key={s} value={s}>
                   {EMPLOYMENT_STATUS_LABEL[s]}
@@ -166,7 +188,7 @@ export default function EmployeeForm({
               id="retireDate"
               name="retireDate"
               type="date"
-              defaultValue={employee?.retireDate ?? ""}
+              defaultValue={pick(v, "retireDate", employee?.retireDate)}
               className={INPUT}
             />
           </Field>
@@ -177,14 +199,14 @@ export default function EmployeeForm({
         <h2 className="mb-4 text-sm font-bold text-[#333333]">連絡先・備考</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="メール" htmlFor="email">
-            <input id="email" name="email" type="email" defaultValue={employee?.email ?? ""} className={INPUT} />
+            <input id="email" name="email" type="email" defaultValue={pick(v, "email", employee?.email)} className={INPUT} />
           </Field>
           <Field label="電話" htmlFor="phone">
-            <input id="phone" name="phone" defaultValue={employee?.phone ?? ""} className={INPUT} />
+            <input id="phone" name="phone" defaultValue={pick(v, "phone", employee?.phone)} className={INPUT} />
           </Field>
           <div className="sm:col-span-2">
             <Field label="備考" htmlFor="note">
-              <textarea id="note" name="note" rows={3} defaultValue={employee?.note ?? ""} className={INPUT} />
+              <textarea id="note" name="note" rows={3} defaultValue={pick(v, "note", employee?.note)} className={INPUT} />
             </Field>
           </div>
         </div>

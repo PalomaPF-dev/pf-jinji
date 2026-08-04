@@ -12,10 +12,13 @@ import {
   type OrgUnitInput,
 } from "@/lib/org";
 import { normalizeOrgKind } from "@/lib/types";
+import { formValues, type FormValues } from "@/lib/formState";
 
 export interface OrgActionState {
   error?: string;
   message?: string;
+  /** 入力エラーで差し戻すときの送信値。React 19 のフォーム自動リセット対策 */
+  values?: FormValues;
 }
 
 function str(form: FormData, key: string): string {
@@ -58,7 +61,7 @@ export async function createOrgUnitAction(_prev: OrgActionState, form: FormData)
   const s = await assertJinjiSession();
   const input = readOrgInput(form);
   const problem = validate(input);
-  if (problem) return { error: problem };
+  if (problem) return { error: problem, values: formValues(form) };
 
   try {
     const id = await createOrgUnit(input);
@@ -75,7 +78,7 @@ export async function createOrgUnitAction(_prev: OrgActionState, form: FormData)
     const msg = (e as { code?: string }).code === "23505"
       ? `組織コード ${input.code} は既に使われています。`
       : (e as Error).message;
-    return { error: msg };
+    return { error: msg, values: formValues(form) };
   }
 
   revalidatePath("/org");
@@ -87,10 +90,10 @@ export async function createOrgUnitAction(_prev: OrgActionState, form: FormData)
 export async function updateOrgUnitAction(_prev: OrgActionState, form: FormData): Promise<OrgActionState> {
   const s = await assertJinjiSession();
   const id = str(form, "id");
-  if (!id) return { error: "対象が指定されていません。" };
+  if (!id) return { error: "対象が指定されていません。", values: formValues(form) };
   const input = readOrgInput(form);
   const problem = validate(input);
-  if (problem) return { error: problem };
+  if (problem) return { error: problem, values: formValues(form) };
 
   const before = await getOrgUnit(id);
   if (!before) return { error: "対象が見つかりません。" };
@@ -101,7 +104,7 @@ export async function updateOrgUnitAction(_prev: OrgActionState, form: FormData)
     const msg = (e as { code?: string }).code === "23505"
       ? `組織コード ${input.code} は既に使われています。`
       : (e as Error).message;
-    return { error: msg };
+    return { error: msg, values: formValues(form) };
   }
 
   await recordAudit({

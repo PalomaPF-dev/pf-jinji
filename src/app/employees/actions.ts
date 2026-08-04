@@ -16,10 +16,13 @@ import {
   type EmployeeInput,
 } from "@/lib/employees";
 import { normalizeEmploymentStatus, type Gender } from "@/lib/types";
+import { formValues, type FormValues } from "@/lib/formState";
 
 export interface ActionState {
   error?: string;
   message?: string;
+  /** 入力エラーで差し戻すときの送信値。React 19 のフォーム自動リセット対策 */
+  values?: FormValues;
   /** CSV取込の結果（取込フォームのみ使う） */
   importResult?: CsvImportResult;
 }
@@ -60,7 +63,7 @@ export async function createEmployeeAction(_prev: ActionState, form: FormData): 
   const s = await assertJinjiSession();
   const input = readEmployeeInput(form);
   const problem = validateEmployee(input);
-  if (problem) return { error: problem };
+  if (problem) return { error: problem, values: formValues(form) };
 
   let id: string;
   try {
@@ -69,7 +72,7 @@ export async function createEmployeeAction(_prev: ActionState, form: FormData): 
     const msg = (e as { code?: string }).code === "23505"
       ? `社員番号 ${input.employeeNo} は既に登録されています。`
       : (e as Error).message;
-    return { error: msg };
+    return { error: msg, values: formValues(form) };
   }
 
   await recordAudit({
@@ -88,10 +91,10 @@ export async function createEmployeeAction(_prev: ActionState, form: FormData): 
 export async function updateEmployeeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const s = await assertJinjiSession();
   const id = str(form, "id");
-  if (!id) return { error: "対象が指定されていません。" };
+  if (!id) return { error: "対象が指定されていません。", values: formValues(form) };
   const input = readEmployeeInput(form);
   const problem = validateEmployee(input);
-  if (problem) return { error: problem };
+  if (problem) return { error: problem, values: formValues(form) };
 
   const before = await getEmployee(id);
   if (!before) return { error: "対象が見つかりません。" };
@@ -102,7 +105,7 @@ export async function updateEmployeeAction(_prev: ActionState, form: FormData): 
     const msg = (e as { code?: string }).code === "23505"
       ? `社員番号 ${input.employeeNo} は既に登録されています。`
       : (e as Error).message;
-    return { error: msg };
+    return { error: msg, values: formValues(form) };
   }
 
   await recordAudit({
