@@ -1,0 +1,355 @@
+import { getSql } from "./neon";
+import { ensureAuthSchema } from "./authDb";
+import { ensurePasswordResetSchema } from "./passwordReset";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * DDL を実行するが、「既に存在する」系のエラーは無視する。
+ * Postgres の CREATE INDEX/TABLE IF NOT EXISTS は同時実行に対して安全ではなく、
+ * 複数リクエストが初回に同時に走ると pg_class のユニーク制約違反(23505/42P07/42710)で
+ * 失敗しうる。冪等な初期化として、これらは握り潰す。
+ */
+async function safeDdl(run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run();
+  } catch (e: any) {
+    const code = e?.code ?? e?.sourceError?.code;
+    // 42P07: duplicate_table, 42710: duplicate_object, 23505: unique_violation(pg_catalog)
+    if (code === "42P07" || code === "42710" || code === "23505") return;
+    throw e;
+  }
+}
+
+let schemaReady: Promise<void> | null = null;
+
+/**
+ * PF人事マスターのドメインテーブルを冪等に作成する。
+ *
+ * - jinji_admins            … 利用許可名簿（このアプリを使える社員番号）
+ * - jinji_org_units         … 組織ツリー（本部→部→課→係。ポータル部署マスタと突合）
+ * - jinji_employees         … 人事マスター本体
+ * - jinji_transfers         … 異動申請書ヘッダ
+ * - jinji_transfer_approvals… 異動申請の承認欄（捺印枠）
+ * - jinji_evaluation_items  … 人事考課の項目マスター
+ * - jinji_evaluations       … 人事考課
+ * - jinji_salaries          … 基本給与（履歴型）
+ * - jinji_qualification_master / jinji_qualifications … 資格マスターと保有資格
+ * - jinji_audit_logs        … 監査ログ（給与・考課は閲覧も記録する）
+ * - jinji_counters          … 異動申請番号の年度連番
+ *
+ * 認証テーブル（companies/users/password_reset_tokens）も同時に用意する。
+ * 同一プロセス内の同時呼び出しは1回の実行に集約（共有プロミス）。失敗時は次回再試行できるよう解除。
+ */
+export function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = buildSchema().catch((e) => {
+      schemaReady = null;
+      throw e;
+    });
+  }
+  return schemaReady;
+}
+
+async function buildSchema(): Promise<void> {
+  const sql = getSql();
+
+  await ensureAuthSchema();
+  await ensurePasswordResetSchema();
+
+  // ===== 利用許可名簿 =====
+  // ポータルの role / can_manage とは独立した、このアプリ固有の名簿。
+  // ここに載っていない社員番号は、ログインできてもアプリを使えない。
+  // is_owner は名簿自体を編集できる人（人事の責任者）。給与・考課も常に閲覧できる。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_admins (
+      login_id       TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      is_owner       BOOLEAN NOT NULL DEFAULT false,
+      can_payroll    BOOLEAN NOT NULL DEFAULT false,
+      can_evaluation BOOLEAN NOT NULL DEFAULT false,
+      note           TEXT,
+      created_by     TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+
+  // ===== 組織ツリー =====
+  // parent_id は自己参照。親を消しても子が孤児にならないよう SET NULL（画面側で「未配置」に出す）。
+  // head_employee_id は jinji_employees への参照だが、employees 側も org_unit_id で
+  // こちらを参照するため循環になる。FK は張らずアプリ側で整合を担保する（ポータルの
+  // pf_portal_workplaces.admin_user_id と同じ方針）。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_org_units (
+      id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      parent_id             UUID REFERENCES jinji_org_units(id) ON DELETE SET NULL,
+      code                  TEXT NOT NULL UNIQUE,
+      name                  TEXT NOT NULL,
+      kind                  TEXT NOT NULL DEFAULT 'other',
+      sort                  INTEGER NOT NULL DEFAULT 0,
+      head_employee_id      UUID,
+      portal_dept_code      TEXT,
+      portal_workplace_code TEXT,
+      description           TEXT,
+      valid_from            DATE,
+      valid_to              DATE,
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_org_units_parent_idx ON jinji_org_units(parent_id, sort)`);
+  // ポータル突合キーは「値があるときだけ一意」。同期の二重取込を防ぐ。
+  await safeDdl(() => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS jinji_org_units_portal_dept_uq
+    ON jinji_org_units(portal_dept_code) WHERE portal_dept_code IS NOT NULL`);
+  await safeDdl(() => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS jinji_org_units_portal_wp_uq
+    ON jinji_org_units(portal_workplace_code) WHERE portal_workplace_code IS NOT NULL`);
+
+  // ===== 人事マスター =====
+  // employee_no はポータルの login_id と同じ値を使う（SSO・権限連携の突合キー）。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_employees (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_no     TEXT NOT NULL UNIQUE,
+      name            TEXT NOT NULL,
+      name_kana       TEXT,
+      gender          TEXT,
+      birth_date      DATE,
+      hire_date       DATE,
+      employment_type TEXT,
+      org_unit_id     UUID REFERENCES jinji_org_units(id) ON DELETE SET NULL,
+      position_name   TEXT,
+      duty_name       TEXT,
+      grade           TEXT,
+      status          TEXT NOT NULL DEFAULT 'active',
+      retire_date     DATE,
+      email           TEXT,
+      phone           TEXT,
+      note            TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_employees_org_idx ON jinji_employees(org_unit_id)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_employees_status_idx ON jinji_employees(status, name_kana)`);
+
+  // ===== 異動申請書 =====
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_transfers (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      transfer_no      TEXT NOT NULL UNIQUE,
+      employee_id      UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      kind             TEXT NOT NULL DEFAULT 'haichi',
+      from_org_unit_id UUID,
+      to_org_unit_id   UUID,
+      from_position    TEXT,
+      to_position      TEXT,
+      from_duty        TEXT,
+      to_duty          TEXT,
+      from_grade       TEXT,
+      to_grade         TEXT,
+      order_date       DATE,
+      effective_date   DATE,
+      reason           TEXT,
+      remarks          TEXT,
+      status           TEXT NOT NULL DEFAULT 'draft',
+      drafted_by       TEXT,
+      drafted_name     TEXT,
+      applied_at       TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_transfers_emp_idx ON jinji_transfers(employee_id, effective_date DESC)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_transfers_status_idx ON jinji_transfers(status, effective_date)`);
+
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_transfer_approvals (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      transfer_id       UUID NOT NULL REFERENCES jinji_transfers(id) ON DELETE CASCADE,
+      slot              TEXT NOT NULL,
+      seq               INTEGER NOT NULL DEFAULT 0,
+      approver_login_id TEXT,
+      approver_name     TEXT,
+      decision          TEXT NOT NULL DEFAULT 'pending',
+      decided_at        TIMESTAMPTZ,
+      comment           TEXT,
+      UNIQUE (transfer_id, slot)
+    )`);
+
+  // 異動申請番号の年度連番（"J26-001" = プレフィックス + 西暦下2桁 + 連番）
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_counters (
+      year INTEGER PRIMARY KEY,
+      seq  INTEGER NOT NULL DEFAULT 0
+    )`);
+
+  // ===== 人事考課 =====
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_evaluation_items (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      code        TEXT NOT NULL UNIQUE,
+      category    TEXT NOT NULL DEFAULT '',
+      name        TEXT NOT NULL,
+      description TEXT,
+      max_score   INTEGER NOT NULL DEFAULT 5,
+      sort        INTEGER NOT NULL DEFAULT 0,
+      active      BOOLEAN NOT NULL DEFAULT true
+    )`);
+
+  // scores は「項目コード → 点数」の JSON。項目マスターを増減しても過去の評価が壊れない。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_evaluations (
+      id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id         UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      period              TEXT NOT NULL,
+      fiscal_year         INTEGER NOT NULL,
+      half                TEXT NOT NULL,
+      primary_evaluator   TEXT,
+      primary_name        TEXT,
+      primary_scores      JSONB NOT NULL DEFAULT '{}',
+      primary_comment     TEXT,
+      primary_done_at     TIMESTAMPTZ,
+      secondary_evaluator TEXT,
+      secondary_name      TEXT,
+      secondary_scores    JSONB NOT NULL DEFAULT '{}',
+      secondary_comment   TEXT,
+      secondary_done_at   TIMESTAMPTZ,
+      overall_rank        TEXT,
+      total_score         NUMERIC,
+      status              TEXT NOT NULL DEFAULT 'draft',
+      finalized_at        TIMESTAMPTZ,
+      finalized_by        TEXT,
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (employee_id, period)
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_evaluations_period_idx ON jinji_evaluations(period)`);
+
+  // ===== 基本給与（履歴型）=====
+  // 訂正は voided_at を立てて無効化する。行は消さない（改定の経緯を残すため）。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_salaries (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id    UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      effective_from DATE NOT NULL,
+      base_salary    INTEGER NOT NULL,
+      allowances     JSONB NOT NULL DEFAULT '[]',
+      grade          TEXT,
+      step           TEXT,
+      revision_kind  TEXT NOT NULL DEFAULT '新規登録',
+      reason         TEXT,
+      decided_by     TEXT,
+      decided_name   TEXT,
+      voided_at      TIMESTAMPTZ,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  // 同一社員・同一適用月の有効行は1本だけ（無効化した行は重複を許す）
+  await safeDdl(() => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS jinji_salaries_effective_uq
+    ON jinji_salaries(employee_id, effective_from) WHERE voided_at IS NULL`);
+  await safeDdl(() => sql`
+    CREATE INDEX IF NOT EXISTS jinji_salaries_emp_idx ON jinji_salaries(employee_id, effective_from DESC)`);
+
+  // ===== 資格 =====
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_qualification_master (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      code             TEXT NOT NULL UNIQUE,
+      name             TEXT NOT NULL,
+      category         TEXT NOT NULL DEFAULT 'other',
+      renewal_required BOOLEAN NOT NULL DEFAULT false,
+      renewal_months   INTEGER,
+      sort             INTEGER NOT NULL DEFAULT 0,
+      active           BOOLEAN NOT NULL DEFAULT true
+    )`);
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_qualifications (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id    UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      master_id      UUID REFERENCES jinji_qualification_master(id) ON DELETE SET NULL,
+      name           TEXT NOT NULL,
+      category       TEXT NOT NULL DEFAULT 'other',
+      acquired_on    DATE,
+      expires_on     DATE,
+      certificate_no TEXT,
+      issuer         TEXT,
+      note           TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_emp_idx ON jinji_qualifications(employee_id)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_expiry_idx ON jinji_qualifications(expires_on)`);
+
+  // ===== 監査ログ =====
+  // 人事情報は機微なため、給与・考課は「閲覧」も記録する。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_audit_logs (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_login_id  TEXT NOT NULL,
+      actor_name      TEXT,
+      action          TEXT NOT NULL,
+      target_type     TEXT,
+      target_id       TEXT,
+      target_label    TEXT,
+      detail          JSONB,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_audit_logs_created_idx ON jinji_audit_logs(created_at DESC)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_audit_logs_target_idx ON jinji_audit_logs(target_type, target_id)`);
+
+  await seedEvaluationItems(sql);
+  await bootstrapAdmins(sql);
+}
+
+/**
+ * 人事考課の項目マスターが空のときだけ、標準的な考課項目を投入する。
+ * 運用開始後は設定画面から増減する（ここは初回だけ）。
+ */
+async function seedEvaluationItems(sql: ReturnType<typeof getSql>): Promise<void> {
+  try {
+    const rows = await sql`SELECT count(*)::int AS n FROM jinji_evaluation_items`;
+    if ((rows[0]?.n as number) !== 0) return;
+    const items: [string, string, string, number, number][] = [
+      ["A01", "業績", "目標達成度", 10, 1],
+      ["A02", "業績", "業務品質", 10, 2],
+      ["A03", "業績", "生産性・効率", 10, 3],
+      ["B01", "能力", "専門知識・技能", 5, 4],
+      ["B02", "能力", "課題形成・改善提案", 5, 5],
+      ["B03", "能力", "判断力", 5, 6],
+      ["C01", "情意", "責任感・規律性", 5, 7],
+      ["C02", "情意", "協調性・チーム貢献", 5, 8],
+      ["C03", "情意", "積極性", 5, 9],
+      ["D01", "管理", "部下育成・指導", 5, 10],
+    ];
+    for (const [code, category, name, maxScore, sort] of items) {
+      await sql`
+        INSERT INTO jinji_evaluation_items (code, category, name, max_score, sort)
+        VALUES (${code}, ${category}, ${name}, ${maxScore}, ${sort})
+        ON CONFLICT (code) DO NOTHING`;
+    }
+  } catch (e) {
+    console.warn("[schema] evaluation item seed skipped:", (e as Error).message);
+  }
+}
+
+/**
+ * 利用許可名簿の初期投入。
+ * JINJI_BOOTSTRAP_ADMIN_IDS（社員番号のカンマ区切り）が設定されている環境でのみ、
+ * その社員番号を owner として冪等に投入する。既に居れば何もしない。
+ * env が無い環境では名簿は空のままで、初期セットアップ画面から登録する。
+ */
+async function bootstrapAdmins(sql: ReturnType<typeof getSql>): Promise<void> {
+  const raw = (process.env.JINJI_BOOTSTRAP_ADMIN_IDS ?? "").trim();
+  if (!raw) return;
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const loginId of ids) {
+    try {
+      await sql`
+        INSERT INTO jinji_admins (login_id, name, is_owner, can_payroll, can_evaluation, note, created_by)
+        VALUES (${loginId}, ${loginId}, true, true, true, ${"環境変数による初期登録"}, ${"bootstrap"})
+        ON CONFLICT (login_id) DO NOTHING`;
+    } catch (e) {
+      console.warn("[schema] admin bootstrap skipped:", loginId, (e as Error).message);
+    }
+  }
+}
