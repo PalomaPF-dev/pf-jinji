@@ -12,7 +12,7 @@ export default function LoginPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon-192.png" alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl" />
           <p className="text-[11px] tracking-[0.08em] text-[#707070]">株式会社パロマ</p>
-          <h1 className="text-lg font-bold text-[#333333]">PF人事マスター</h1>
+          <h1 className="text-lg font-bold text-[#333333]">PF人事管理</h1>
           <p className="mt-1 text-xs text-[#909090]">生産・調達統括本部（管理者専用）</p>
         </div>
         <div className="rounded-xl border border-[#e5e5e5] bg-white p-6">

@@ -23,7 +23,7 @@ export default async function ForbiddenPage({
   const session = await getServerSession(authOptions);
   const message =
     (need && NEED_MESSAGE[need]) ??
-    "PF人事マスターは、生産・調達統括本部の人事担当者のみが利用できるアプリです。";
+    "PF人事管理は、生産・調達統括本部の人事担当者のみが利用できるアプリです。";
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">

@@ -1,4 +1,4 @@
-# PF人事マスター（paloma-pf-jinji）
+# PF人事管理（paloma-pf-jinji）
 
 生産・調達統括本部の**人事マスター**。人事情報の原本を持ち、組織図の形成・異動申請書の作成・
 人事考課・基本給与・資格までを一元管理する、**管理者専用**の社内業務アプリ。
@@ -107,9 +107,23 @@ npm run build
 | `lib/provision.js` | `PROVISION_APP_KEYS` に `"jinji"` |
 | `api/user.js` | `SSO_APP_KEYS` に `"jinji"` |
 | `index.html` / `admin.html` | `APPS` にタイル定義、`SSO_APPS` に追加 |
+| `icons/jinji.png` | タイル用アイコン。本リポジトリの `public/icon-192.png` をそのままコピーする |
 | 部署マスター | **管理者部署（D999 等）にだけ** `jinji` を割り当てる |
 
 上記が入るまでの間も、本アプリは自前ログインとCSV取込だけで完結して運用できる。
+
+## アイコン
+
+PFシリーズ各アプリと同じ意匠で作成している。
+
+- 正方形（角丸は OS / CSS 側で付く）
+- 左上が明るく右下が濃い斜めグラデーション。アプリのアクセント色 `#2563eb` を中庸に置く
+- 左下にごく淡い光のにじみ
+- 中央に lucide の白い線画グリフ。ナビの「社員台帳」と同じ `users` を使い、
+  アプリ内のアイコンと絵柄を揃えている
+
+`public/` に 3 サイズを置いてある（`icon-192.png` / `icon-512.png` / `apple-touch-icon.png`）。
+ポータルのタイル用 `icons/jinji.png` は `icon-192.png` と同一。
 
 ## 異動申請書の指定フォームについて
 

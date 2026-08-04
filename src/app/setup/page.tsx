@@ -29,7 +29,7 @@ export default async function SetupPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon-192.png" alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl" />
           <p className="text-[11px] tracking-[0.08em] text-[#707070]">株式会社パロマ</p>
-          <h1 className="text-lg font-bold text-[#333333]">PF人事マスター 初期セットアップ</h1>
+          <h1 className="text-lg font-bold text-[#333333]">PF人事管理 初期セットアップ</h1>
           <p className="mt-2 text-xs text-[#909090]">
             最初の1人（人事の責任者）を登録します。以後の利用者は設定画面から追加してください。
           </p>

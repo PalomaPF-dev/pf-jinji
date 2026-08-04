@@ -3,7 +3,7 @@ import { neon } from "@neondatabase/serverless";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * DB アダプタ（PF人事マスター 専用DB）。
+ * DB アダプタ（PF人事管理 専用DB）。
  *
  * クラウド版（Neon HTTP ドライバ）とオンプレ版（node-postgres / pg）を
  * 同一コードベースで切り替える。db.ts / schema.ts / authDb.ts 側は

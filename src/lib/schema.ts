@@ -24,7 +24,7 @@ async function safeDdl(run: () => Promise<unknown>): Promise<void> {
 let schemaReady: Promise<void> | null = null;
 
 /**
- * PF人事マスターのドメインテーブルを冪等に作成する。
+ * PF人事管理のドメインテーブルを冪等に作成する。
  *
  * - jinji_admins            … 利用許可名簿（このアプリを使える社員番号）
  * - jinji_org_units         … 組織ツリー（本部→部→課→係。ポータル部署マスタと突合）

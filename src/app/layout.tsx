@@ -17,11 +17,11 @@ const notoSansJP = Noto_Sans_JP({
 });
 
 export const metadata: Metadata = {
-  title: "PF人事マスター",
+  title: "PF人事管理",
   description:
     "生産・調達統括本部の人事マスター。人事情報・組織図・異動申請書・人事考課・基本給与・資格を一元管理（管理者専用）",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "PF人事マスター", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "PF人事管理", statusBarStyle: "default" },
   icons: { icon: "/icon-192.png", apple: "/apple-touch-icon.png" },
   // 人事情報を扱うため、検索エンジンには一切載せない
   robots: { index: false, follow: false },

@@ -62,7 +62,7 @@ export default function AppShell({
   return (
     <BaseAppShell
       nav={nav}
-      brand={{ eyebrow: "株式会社パロマ", title: "PF人事マスター", subtitle: "人事情報・組織図・異動申請" }}
+      brand={{ eyebrow: "株式会社パロマ", title: "PF人事管理", subtitle: "人事情報・組織図・異動申請" }}
       accent="#2563eb"
       // 認証系に加え、名簿未登録者の案内（/forbidden）と初期セットアップ（/setup）も
       // シェル無しで出す。どちらもナビを見せる意味が無い画面のため。
