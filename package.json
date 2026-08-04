@@ -1,0 +1,35 @@
+{
+  "name": "paloma-pf-jinji",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 5190",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "@paloma-pf/ui": "github:PalomaPF-dev/pf-ui#68e3ef668db99903204c2fccf3824cc0270b36f8",
+    "bcryptjs": "^3.0.3",
+    "lucide-react": "^1.8.0",
+    "next": "16.2.4",
+    "next-auth": "^4.24.14",
+    "pg": "^8.22.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
