@@ -29,8 +29,9 @@ let schemaReady: Promise<void> | null = null;
  * - jinji_admins            … 利用許可名簿（このアプリを使える社員番号）
  * - jinji_org_units         … 組織ツリー（本部→部→課→係。ポータル部署マスタと突合）
  * - jinji_employees         … 人事マスター本体
- * - jinji_transfers         … 異動申請書ヘッダ
+ * - jinji_transfers         … 異動申請書ヘッダ（指定帳票 J-426(9)）
  * - jinji_transfer_approvals… 異動申請の承認欄（捺印枠）
+ * - jinji_reemployments / jinji_reemployment_approvals … 継続雇用申請書（指定帳票 J-456）
  * - jinji_evaluation_items  … 人事考課の項目マスター
  * - jinji_evaluations       … 人事考課
  * - jinji_salaries          … 基本給与（履歴型）
@@ -160,6 +161,36 @@ async function buildSchema(): Promise<void> {
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_transfers_emp_idx ON jinji_transfers(employee_id, effective_date DESC)`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_transfers_status_idx ON jinji_transfers(status, effective_date)`);
 
+  // 指定帳票 J-426(9)（異動申請書・組織名称追加変更申請書）の記入欄。
+  // すでに運用中のDBにも足せるよう、CREATE TABLE を書き換えずに ADD COLUMN で継ぎ足す。
+  // 1文ずつ safeDdl で包むのは、同時初回アクセスのカタログ競合を無視するため。
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS form_kind TEXT NOT NULL DEFAULT 'transfer'`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS form_date DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS arrival_date DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS limited_from DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS limited_to DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS dept_agreement TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS org_name_before TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS org_name_after TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS relocation TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS housing_before TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS housing_after TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS assignment_before TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS assignment_after TEXT`);
+  // <単身赴任 事由> は複数チェック可。①〜④の添字を配列で持つ
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS single_reasons JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS mobile TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS mobile_after TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS company_car TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS company_car_after TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS company_car_other TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS parking TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS commute_change TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS explained_agreed BOOLEAN NOT NULL DEFAULT false`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS successor_checked BOOLEAN NOT NULL DEFAULT false`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS system_dept_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS system_dept_name TEXT`);
+
   await safeDdl(() => sql`
     CREATE TABLE IF NOT EXISTS jinji_transfer_approvals (
       id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,10 +206,61 @@ async function buildSchema(): Promise<void> {
     )`);
 
   // 異動申請番号の年度連番（"J26-001" = プレフィックス + 西暦下2桁 + 連番）
+  // kind 列で帳票の種類ごとに別の連番を持つ（異動 J / 継続雇用 R）。
   await safeDdl(() => sql`
     CREATE TABLE IF NOT EXISTS jinji_counters (
       year INTEGER PRIMARY KEY,
       seq  INTEGER NOT NULL DEFAULT 0
+    )`);
+  await safeDdl(() => sql`ALTER TABLE jinji_counters ADD COLUMN IF NOT EXISTS reemp_seq INTEGER NOT NULL DEFAULT 0`);
+
+  // ===== 継続雇用申請書（指定帳票 J-456）=====
+  // 高齢者雇用・アルバイト契約の満了に伴い、期間を限って雇用を継続することを申請する。
+  // 異動申請と違い人事マスターへの発令は伴わないため、承認までで完結する。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_reemployments (
+      id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      doc_no                  TEXT NOT NULL UNIQUE,
+      employee_id             UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      -- 所属は申請時点の名称を焼き付ける（後から組織が変わっても帳票は当時のまま）
+      org_unit_name           TEXT,
+      current_employment_type TEXT,
+      contract_end_date       DATE,
+      employment_type         TEXT,
+      period_from             DATE,
+      period_to               DATE,
+      work_place              TEXT,
+      days_per_week           NUMERIC(3,1),
+      work_start              TEXT,
+      work_end                TEXT,
+      break_hours             NUMERIC(3,1),
+      -- 業務内容①②③ と 継続雇用の理由・必要性①〜④。見出しは帳票側の固定文言なので本文だけ持つ
+      duties                  JSONB NOT NULL DEFAULT '[]'::jsonb,
+      reasons                 JSONB NOT NULL DEFAULT '[]'::jsonb,
+      compliance              TEXT,
+      conclusion              TEXT,
+      status                  TEXT NOT NULL DEFAULT 'draft',
+      drafted_by              TEXT,
+      drafted_name            TEXT,
+      form_date               DATE,
+      created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_reemployments_emp_idx ON jinji_reemployments(employee_id, contract_end_date DESC)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_reemployments_status_idx ON jinji_reemployments(status, contract_end_date)`);
+
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_reemployment_approvals (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      reemployment_id   UUID NOT NULL REFERENCES jinji_reemployments(id) ON DELETE CASCADE,
+      slot              TEXT NOT NULL,
+      seq               INTEGER NOT NULL DEFAULT 0,
+      approver_login_id TEXT,
+      approver_name     TEXT,
+      decision          TEXT NOT NULL DEFAULT 'pending',
+      decided_at        TIMESTAMPTZ,
+      comment           TEXT,
+      UNIQUE (reemployment_id, slot)
     )`);
 
   // ===== 人事考課 =====

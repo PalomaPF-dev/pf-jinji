@@ -4,12 +4,14 @@ import { toISODate } from "./format";
 import { buildTransferNo } from "./transferForm";
 import {
   TRANSFER_APPROVAL_SLOTS,
+  normalizeTransferFormKind,
   normalizeTransferKind,
   normalizeTransferStatus,
   type ApprovalDecision,
   type Transfer,
   type TransferApproval,
   type TransferApprovalSlot,
+  type TransferFormKind,
   type TransferKind,
   type TransferStatus,
 } from "./types";
@@ -44,7 +46,52 @@ function mapTransfer(r: any): Transfer {
     appliedAt: r.applied_at ? new Date(r.applied_at).toISOString() : null,
     createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+
+    // ===== 指定帳票 J-426(9) の記入欄 =====
+    formKind: normalizeTransferFormKind(r.form_kind),
+    formDate: toISODate(r.form_date),
+    arrivalDate: toISODate(r.arrival_date),
+    limitedFrom: toISODate(r.limited_from),
+    limitedTo: toISODate(r.limited_to),
+    deptAgreement: r.dept_agreement ?? null,
+    orgNameBefore: r.org_name_before ?? null,
+    orgNameAfter: r.org_name_after ?? null,
+    relocation: r.relocation ?? null,
+    housingBefore: r.housing_before ?? null,
+    housingAfter: r.housing_after ?? null,
+    assignmentBefore: r.assignment_before ?? null,
+    assignmentAfter: r.assignment_after ?? null,
+    singleReasons: numberList(r.single_reasons),
+    mobile: r.mobile ?? null,
+    mobileAfter: r.mobile_after ?? null,
+    companyCar: r.company_car ?? null,
+    companyCarAfter: r.company_car_after ?? null,
+    companyCarOther: r.company_car_other ?? null,
+    parking: r.parking ?? null,
+    commuteChange: r.commute_change ?? null,
+    explainedAgreed: Boolean(r.explained_agreed),
+    successorChecked: Boolean(r.successor_checked),
+    systemDeptCode: r.system_dept_code ?? null,
+    systemDeptName: r.system_dept_name ?? null,
   };
+}
+
+/**
+ * jsonb 列を数値配列として読む。ドライバによって配列が来たり
+ * JSON文字列が来たりするので両方を受ける。
+ */
+function numberList(v: unknown): number[] {
+  const raw = typeof v === "string" ? safeParse(v) : v;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 0);
+}
+
+function safeParse(v: string): unknown {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return null;
+  }
 }
 
 function mapApproval(r: any): TransferApproval {
@@ -165,13 +212,55 @@ export interface TransferInput {
   effectiveDate: string | null;
   reason: string | null;
   remarks: string | null;
+
+  // ===== 指定帳票 J-426(9) の記入欄 =====
+  formKind: TransferFormKind;
+  formDate: string | null;
+  arrivalDate: string | null;
+  limitedFrom: string | null;
+  limitedTo: string | null;
+  deptAgreement: string | null;
+  orgNameBefore: string | null;
+  orgNameAfter: string | null;
+  relocation: string | null;
+  housingBefore: string | null;
+  housingAfter: string | null;
+  assignmentBefore: string | null;
+  assignmentAfter: string | null;
+  singleReasons: number[];
+  mobile: string | null;
+  mobileAfter: string | null;
+  companyCar: string | null;
+  companyCarAfter: string | null;
+  companyCarOther: string | null;
+  parking: string | null;
+  commuteChange: string | null;
+  explainedAgreed: boolean;
+  successorChecked: boolean;
+  systemDeptCode: string | null;
+  systemDeptName: string | null;
 }
 
 export function validateTransfer(input: TransferInput): string | null {
   if (!input.employeeId) return "対象者を選んでください。";
+
+  // 組織名称追加変更として起票した場合は、人の異動を伴わない。
+  // 帳票の【組織名称】欄だけが要るので、異動側の必須チェックはかけない。
+  if (input.formKind === "org_rename") {
+    if (!input.orgNameAfter?.trim()) return "組織名称の「追加・変更後」を入力してください。";
+    return null;
+  }
+
   if (!input.effectiveDate) return "適用日を入力してください。";
   if (input.orderDate && input.effectiveDate && input.orderDate > input.effectiveDate) {
     return "適用日が発令日より前になっています。";
+  }
+  if (input.limitedFrom && input.limitedTo && input.limitedFrom > input.limitedTo) {
+    return "期間限定の開始日が終了日より後になっています。";
+  }
+  // 単身赴任事由は「異動後の赴任形態が単身赴任」のときだけ意味を持つ
+  if (input.singleReasons.length > 0 && input.assignmentAfter !== "単身赴任") {
+    return "単身赴任事由は、異動後の赴任形態が「単身赴任」のときだけ選べます。";
   }
   // 退職・兼務解除以外は「異動後」が何か1つは変わっているはず
   const changesNothing =
@@ -228,12 +317,27 @@ export async function createTransfer(
     INSERT INTO jinji_transfers
       (transfer_no, employee_id, kind, from_org_unit_id, to_org_unit_id,
        from_position, to_position, from_duty, to_duty, from_grade, to_grade,
-       order_date, effective_date, reason, remarks, status, drafted_by, drafted_name)
+       order_date, effective_date, reason, remarks, status, drafted_by, drafted_name,
+       form_kind, form_date, arrival_date, limited_from, limited_to, dept_agreement,
+       org_name_before, org_name_after, relocation, housing_before, housing_after,
+       assignment_before, assignment_after, single_reasons, mobile, mobile_after,
+       company_car, company_car_after, company_car_other, parking, commute_change,
+       explained_agreed, successor_checked, system_dept_code, system_dept_name)
     VALUES (${transferNo}, ${input.employeeId}, ${input.kind}, ${fromOrgUnitId}, ${input.toOrgUnitId},
             ${fromPosition}, ${input.toPosition}, ${fromDuty}, ${input.toDuty},
             ${fromGrade}, ${input.toGrade},
             ${input.orderDate}, ${input.effectiveDate}, ${input.reason}, ${input.remarks},
-            'draft', ${draftedBy}, ${draftedName})
+            'draft', ${draftedBy}, ${draftedName},
+            ${input.formKind}, ${input.formDate}, ${input.arrivalDate},
+            ${input.limitedFrom}, ${input.limitedTo}, ${input.deptAgreement},
+            ${input.orgNameBefore}, ${input.orgNameAfter}, ${input.relocation},
+            ${input.housingBefore}, ${input.housingAfter},
+            ${input.assignmentBefore}, ${input.assignmentAfter},
+            ${JSON.stringify(input.singleReasons)}::jsonb, ${input.mobile}, ${input.mobileAfter},
+            ${input.companyCar}, ${input.companyCarAfter}, ${input.companyCarOther},
+            ${input.parking}, ${input.commuteChange},
+            ${input.explainedAgreed}, ${input.successorChecked},
+            ${input.systemDeptCode}, ${input.systemDeptName})
     RETURNING id`;
   const id = rows[0].id as string;
 
@@ -273,6 +377,31 @@ export async function updateTransfer(id: string, input: TransferInput): Promise<
       effective_date = ${input.effectiveDate},
       reason = ${input.reason},
       remarks = ${input.remarks},
+      form_kind = ${input.formKind},
+      form_date = ${input.formDate},
+      arrival_date = ${input.arrivalDate},
+      limited_from = ${input.limitedFrom},
+      limited_to = ${input.limitedTo},
+      dept_agreement = ${input.deptAgreement},
+      org_name_before = ${input.orgNameBefore},
+      org_name_after = ${input.orgNameAfter},
+      relocation = ${input.relocation},
+      housing_before = ${input.housingBefore},
+      housing_after = ${input.housingAfter},
+      assignment_before = ${input.assignmentBefore},
+      assignment_after = ${input.assignmentAfter},
+      single_reasons = ${JSON.stringify(input.singleReasons)}::jsonb,
+      mobile = ${input.mobile},
+      mobile_after = ${input.mobileAfter},
+      company_car = ${input.companyCar},
+      company_car_after = ${input.companyCarAfter},
+      company_car_other = ${input.companyCarOther},
+      parking = ${input.parking},
+      commute_change = ${input.commuteChange},
+      explained_agreed = ${input.explainedAgreed},
+      successor_checked = ${input.successorChecked},
+      system_dept_code = ${input.systemDeptCode},
+      system_dept_name = ${input.systemDeptName},
       updated_at = NOW()
     WHERE id = ${id}`;
 }
