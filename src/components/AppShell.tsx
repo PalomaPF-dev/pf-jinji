@@ -6,6 +6,7 @@ import {
   Users,
   Network,
   FileText,
+  FileClock,
   ClipboardCheck,
   Wallet,
   Award,
@@ -50,6 +51,7 @@ export default function AppShell({
       title: "手続き",
       items: [
         { href: "/transfers", label: "異動申請書", icon: FileText },
+        { href: "/reemployments", label: "継続雇用申請書", icon: FileClock },
         ...(canEvaluation ? [{ href: "/evaluations", label: "人事考課", icon: ClipboardCheck }] : []),
         ...(canPayroll ? [{ href: "/salaries", label: "基本給与", icon: Wallet }] : []),
       ],

@@ -2,8 +2,10 @@ import {
   EMPLOYMENT_STATUS_LABEL,
   TRANSFER_STATUS_LABEL,
   EVALUATION_STATUS_LABEL,
+  REEMPLOYMENT_STATUS_LABEL,
   type EmploymentStatus,
   type EvaluationStatus,
+  type ReemploymentStatus,
   type TransferStatus,
 } from "@/lib/types";
 
@@ -36,6 +38,13 @@ const TRANSFER_STATUS_STYLE: Record<TransferStatus, string> = {
 
 export function TransferStatusBadge({ status }: { status: TransferStatus }) {
   return <Pill text={TRANSFER_STATUS_LABEL[status]} className={TRANSFER_STATUS_STYLE[status]} />;
+}
+
+/** 継続雇用申請（J-456）は発令を伴わないので issued が無い。色は異動申請と揃える。 */
+export function ReemploymentStatusBadge({ status }: { status: ReemploymentStatus }) {
+  return (
+    <Pill text={REEMPLOYMENT_STATUS_LABEL[status]} className={TRANSFER_STATUS_STYLE[status]} />
+  );
 }
 
 const EVALUATION_STATUS_STYLE: Record<EvaluationStatus, string> = {

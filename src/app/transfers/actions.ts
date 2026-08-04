@@ -15,8 +15,21 @@ import {
   validateTransfer,
   type TransferInput,
 } from "@/lib/transfers";
-import { TRANSFER_APPROVAL_SLOTS, normalizeTransferKind, type TransferApprovalSlot } from "@/lib/types";
-import { formValues, type FormValues } from "@/lib/formState";
+import {
+  ASSIGNMENT_KINDS,
+  COMPANY_CAR_AFTER_KINDS,
+  DEPT_AGREEMENTS,
+  HOUSING_KINDS,
+  MOBILE_AFTER_KINDS,
+  PARKING_KINDS,
+  SINGLE_ASSIGNMENT_REASONS,
+  TRANSFER_APPROVAL_SLOTS,
+  YES_NO,
+  normalizeTransferFormKind,
+  normalizeTransferKind,
+  type TransferApprovalSlot,
+} from "@/lib/types";
+import { formValues, withMulti, type FormValues } from "@/lib/formState";
 import { buildPortalPayloadFor, describePushResult, pushToPortal } from "@/lib/portalPush";
 
 export interface TransferActionState {
@@ -35,7 +48,43 @@ function nullable(form: FormData, key: string): string | null {
   return v === "" ? null : v;
 }
 
+/**
+ * 選択肢に載っている値だけを通す。帳票のチェック欄は「未選択」を許すので、
+ * 空文字と想定外の値はどちらも null に倒す（不正値がそのまま帳票に出ない）。
+ */
+function choice(form: FormData, key: string, allowed: readonly string[]): string | null {
+  const v = str(form, key);
+  return allowed.includes(v) ? v : null;
+}
+
+function checked(form: FormData, key: string): boolean {
+  return form.get(key) != null;
+}
+
+/**
+ * 入力エラーで差し戻すときに画面へ返す送信値。
+ * 単身赴任事由だけは同名の複数チェックなので、畳んでから返す。
+ */
+function keepValues(form: FormData): FormValues {
+  return withMulti(formValues(form), form, ["singleReasons"]);
+}
+
+/** <単身赴任 事由> は複数チェック可。①〜④の添字だけを拾う。 */
+function singleReasonIndexes(form: FormData): number[] {
+  return form
+    .getAll("singleReasons")
+    .map((v) => Number(v.toString()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < SINGLE_ASSIGNMENT_REASONS.length)
+    .sort((a, b) => a - b);
+}
+
 function readInput(form: FormData): TransferInput {
+  const relocation = choice(form, "relocation", YES_NO);
+  const mobile = choice(form, "mobile", YES_NO);
+  const companyCar = choice(form, "companyCar", YES_NO);
+  const assignmentAfter = choice(form, "assignmentAfter", ASSIGNMENT_KINDS);
+  const companyCarAfter = choice(form, "companyCarAfter", COMPANY_CAR_AFTER_KINDS);
+
   return {
     employeeId: str(form, "employeeId"),
     kind: normalizeTransferKind(str(form, "kind")),
@@ -51,6 +100,36 @@ function readInput(form: FormData): TransferInput {
     effectiveDate: nullable(form, "effectiveDate"),
     reason: nullable(form, "reason"),
     remarks: nullable(form, "remarks"),
+
+    // ===== 指定帳票 J-426(9) の記入欄 =====
+    formKind: normalizeTransferFormKind(str(form, "formKind")),
+    formDate: nullable(form, "formDate"),
+    arrivalDate: nullable(form, "arrivalDate"),
+    limitedFrom: nullable(form, "limitedFrom"),
+    limitedTo: nullable(form, "limitedTo"),
+    deptAgreement: choice(form, "deptAgreement", DEPT_AGREEMENTS),
+    orgNameBefore: nullable(form, "orgNameBefore"),
+    orgNameAfter: nullable(form, "orgNameAfter"),
+    relocation,
+    // 転居「なし」なら住居欄は意味を持たないので落とす（帳票に矛盾した印が出ないように）
+    housingBefore: relocation === "あり" ? choice(form, "housingBefore", HOUSING_KINDS) : null,
+    housingAfter: relocation === "あり" ? choice(form, "housingAfter", HOUSING_KINDS) : null,
+    assignmentBefore: choice(form, "assignmentBefore", ASSIGNMENT_KINDS),
+    assignmentAfter,
+    // 単身赴任事由は異動後が単身赴任のときだけ
+    singleReasons: assignmentAfter === "単身赴任" ? singleReasonIndexes(form) : [],
+    mobile,
+    mobileAfter: mobile === "あり" ? choice(form, "mobileAfter", MOBILE_AFTER_KINDS) : null,
+    companyCar,
+    companyCarAfter: companyCar === "あり" ? companyCarAfter : null,
+    companyCarOther:
+      companyCar === "あり" && companyCarAfter === "その他" ? nullable(form, "companyCarOther") : null,
+    parking: companyCar === "あり" ? choice(form, "parking", PARKING_KINDS) : null,
+    commuteChange: choice(form, "commuteChange", YES_NO),
+    explainedAgreed: checked(form, "explainedAgreed"),
+    successorChecked: checked(form, "successorChecked"),
+    systemDeptCode: nullable(form, "systemDeptCode"),
+    systemDeptName: nullable(form, "systemDeptName"),
   };
 }
 
@@ -61,13 +140,13 @@ export async function createTransferAction(
   const s = await assertJinjiSession();
   const input = readInput(form);
   const problem = validateTransfer(input);
-  if (problem) return { error: problem, values: formValues(form) };
+  if (problem) return { error: problem, values: keepValues(form) };
 
   let id: string;
   try {
     id = await createTransfer(input, s.grant.loginId, s.grant.name);
   } catch (e) {
-    return { error: (e as Error).message, values: formValues(form) };
+    return { error: (e as Error).message, values: keepValues(form) };
   }
 
   const t = await getTransfer(id);
@@ -89,15 +168,15 @@ export async function updateTransferAction(
 ): Promise<TransferActionState> {
   const s = await assertJinjiSession();
   const id = str(form, "id");
-  if (!id) return { error: "対象が指定されていません。", values: formValues(form) };
+  if (!id) return { error: "対象が指定されていません。", values: keepValues(form) };
   const input = readInput(form);
   const problem = validateTransfer(input);
-  if (problem) return { error: problem, values: formValues(form) };
+  if (problem) return { error: problem, values: keepValues(form) };
 
   try {
     await updateTransfer(id, input);
   } catch (e) {
-    return { error: (e as Error).message, values: formValues(form) };
+    return { error: (e as Error).message, values: keepValues(form) };
   }
 
   const t = await getTransfer(id);

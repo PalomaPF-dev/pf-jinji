@@ -28,3 +28,30 @@ export function pick(values: FormValues | undefined, key: string, saved: string 
   if (values && key in values) return values[key];
   return saved ?? "";
 }
+
+/**
+ * 同じ name を複数持つ入力（チェックボックス群）を1つの値として畳む。
+ *
+ * formValues() は FormData.entries() を回すので、同名キーは最後の1つで
+ * 上書きされてしまう。単身赴任事由のような複数選択はそれでは復元できないため、
+ * カンマ区切りにまとめて同じキーへ入れ直す。
+ */
+export function withMulti(values: FormValues, form: FormData, keys: string[]): FormValues {
+  const out = { ...values };
+  for (const key of keys) {
+    out[key] = form
+      .getAll(key)
+      .map((v) => v.toString())
+      .join(",");
+  }
+  return out;
+}
+
+/** withMulti() で畳んだ値を数値の配列に戻す。 */
+export function pickMulti(values: FormValues | undefined, key: string, saved: number[]): number[] {
+  if (!values || !(key in values)) return saved;
+  return values[key]
+    .split(",")
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n) && n >= 0);
+}
