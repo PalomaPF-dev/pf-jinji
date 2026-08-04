@@ -17,6 +17,7 @@ import {
 } from "@/lib/transfers";
 import { TRANSFER_APPROVAL_SLOTS, normalizeTransferKind, type TransferApprovalSlot } from "@/lib/types";
 import { formValues, type FormValues } from "@/lib/formState";
+import { buildPortalPayloadFor, describePushResult, pushToPortal } from "@/lib/portalPush";
 
 export interface TransferActionState {
   error?: string;
@@ -219,7 +220,35 @@ export async function applyTransferAction(
   revalidatePath(`/transfers/${id}`);
   revalidatePath("/employees");
   revalidatePath("/org");
-  return { message: "発令し、人事マスターへ反映しました。" };
+
+  // 発令したらポータルの所属も追従させる。ここが繋がることで、異動が各業務アプリの
+  // 部署・権限にまで反映される。
+  // 連携に失敗しても発令そのものは成立しているので、状態は戻さず注意書きだけ添える
+  // （設定画面の「ポータルへ連携」から後追いでやり直せる）。
+  let portalNote = "";
+  if (before?.employeeNo) {
+    try {
+      const result = await pushToPortal(await buildPortalPayloadFor([before.employeeNo]));
+      if (result.errors.length > 0) {
+        portalNote = `ただしポータルへの連携は失敗しました（${result.errors[0].message}）。設定画面から連携し直してください。`;
+      } else {
+        portalNote = `ポータルへも連携しました（${describePushResult(result)}）。`;
+      }
+      await recordAudit({
+        actorLoginId: s.grant.loginId,
+        actorName: s.grant.name,
+        action: "push_portal",
+        targetType: "employee",
+        targetId: before.employeeId,
+        targetLabel: `${before.employeeNo} ${before.employeeName}`,
+        detail: { trigger: "apply_transfer", errorCount: result.errors.length },
+      });
+    } catch (e) {
+      portalNote = `ただしポータルへの連携は失敗しました（${(e as Error).message}）。設定画面から連携し直してください。`;
+    }
+  }
+
+  return { message: `発令し、人事マスターへ反映しました。${portalNote}` };
 }
 
 export async function deleteTransferAction(

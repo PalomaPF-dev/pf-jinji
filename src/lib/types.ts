@@ -432,6 +432,7 @@ export type AuditAction =
   | "apply_transfer"
   | "update_org"
   | "sync_portal"
+  | "push_portal"
   | "update_admin";
 
 export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
@@ -447,7 +448,8 @@ export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
   approve_transfer: "異動申請を承認/差戻",
   apply_transfer: "異動を発令・反映",
   update_org: "組織を変更",
-  sync_portal: "ポータル部署を同期",
+  sync_portal: "ポータル部署を取込",
+  push_portal: "ポータルへ人事情報を連携",
   update_admin: "利用許可名簿を変更",
 };
 

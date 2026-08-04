@@ -11,6 +11,7 @@ import AdminUpsertForm, { IssueLinkForm, RemoveAdminForm } from "@/components/Ad
 import QualificationMasterForm, {
   DeleteQualificationMasterForm,
 } from "@/components/QualificationMasterForms";
+import PortalPushPanel from "@/components/PortalPushPanel";
 import { AUDIT_ACTION_LABEL, QUALIFICATION_CATEGORY_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +92,12 @@ export default async function SettingsPage({
           </div>
 
           <AdminUpsertForm key={editing?.loginId ?? "new"} editing={editing} />
+        </section>
+
+        {/* ===== ポータル連携 ===== */}
+        <section>
+          <h2 className="mb-3 text-base font-bold text-[#333333]">ポータル連携</h2>
+          <PortalPushPanel />
         </section>
 
         {/* ===== 資格マスター ===== */}
