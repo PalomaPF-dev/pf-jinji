@@ -42,31 +42,36 @@ export async function GET(req: NextRequest) {
   if (!provisionKey) {
     return NextResponse.json({ message: "provision未設定" }, { status: 503 });
   }
-  const fail = () => NextResponse.redirect(new URL("/login?error=sso", req.nextUrl), 302);
+  // 失敗理由はサーバーログにだけ残す。利用者への応答は理由を明かさない（従来どおり）。
+  // 無言で失敗すると、鍵の不一致なのかDB断なのか運用時に切り分けられないため。
+  const fail = (reason: string) => {
+    console.warn("[sso] rejected:", reason);
+    return NextResponse.redirect(new URL("/login?error=sso", req.nextUrl), 302);
+  };
 
   const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret) return fail();
+  if (!secret) return fail("NEXTAUTH_SECRET が未設定");
 
   try {
     const raw = req.nextUrl.searchParams.get("token") ?? "";
     const dot = raw.lastIndexOf(".");
-    if (dot <= 0 || dot === raw.length - 1) return fail();
+    if (dot <= 0 || dot === raw.length - 1) return fail("トークンの形式が不正");
     const payload = raw.slice(0, dot);
     const sig = raw.slice(dot + 1);
 
     const expected = createHmac("sha256", provisionKey).update(payload).digest("hex");
-    if (!safeEqual(sig, expected)) return fail();
+    if (!safeEqual(sig, expected)) return fail("署名が一致しない（PF_PROVISION_KEY の不一致か改ざん）");
 
     let data: { loginId?: unknown; name?: unknown; app?: unknown; exp?: unknown };
     try {
       data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     } catch {
-      return fail();
+      return fail("ペイロードが JSON として読めない");
     }
     const loginId = typeof data.loginId === "string" ? data.loginId.trim() : "";
-    if (!loginId) return fail();
-    if (data.app !== APP_KEY) return fail();
-    if (typeof data.exp !== "number" || !(data.exp > Date.now())) return fail();
+    if (!loginId) return fail("loginId が空");
+    if (data.app !== APP_KEY) return fail(`別アプリ宛のトークン（app=${String(data.app)}）`);
+    if (typeof data.exp !== "number" || !(data.exp > Date.now())) return fail("トークンの有効期限切れ");
 
     await ensureSchema();
     const sql = getSql();
@@ -94,7 +99,7 @@ export async function GET(req: NextRequest) {
       `;
     }
     const user = rows[0];
-    if (!user) return fail();
+    if (!user) return fail("アカウントを作成できなかった");
 
     // authorize → jwt コールバック通過後と同一フィールドのトークンを構築
     const sessionToken = await encode({
@@ -123,7 +128,8 @@ export async function GET(req: NextRequest) {
       maxAge: SESSION_MAX_AGE,
     });
     return res;
-  } catch {
-    return fail();
+  } catch (e) {
+    // DB断など。理由が分からないと運用時に切り分けられないので必ず残す。
+    return fail(`処理中に例外: ${(e as Error).message}`);
   }
 }

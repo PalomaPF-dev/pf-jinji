@@ -54,6 +54,16 @@ SSO・権限の枠組みと連動する。
 
 さらに、給与・考課は**閲覧も**監査ログ（`jinji_audit_logs`）に記録する。
 
+## 公開URL
+
+本番は **https://jinji.paloma.co.jp**（他のPFアプリは `*.paloma-pf.com` だが、
+本アプリは社内向けの人事情報を扱うため別ドメインで運用する）。
+
+ポータルからのSSOはドメインを跨ぐが、`/api/sso` へのトップレベル遷移で
+このドメイン自身にセッションクッキーを発行するため、そのまま動作する。
+Vercel 側でドメインを割り当てたうえで、`NEXTAUTH_URL` を同じURLにすること
+（パスワード設定リンクの生成にも使うため）。
+
 ## 技術スタック
 
 - Next.js 16（App Router／Server Components＋Server Actions）
@@ -132,7 +142,7 @@ npm run build
 | ファイル | 変更内容 |
 |---|---|
 | `lib/db.js` | `ALL_APP_KEYS` に `"jinji"` |
-| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma-pf.com"` |
+| `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma.co.jp"` |
 | `lib/provision.js` | `PROVISION_APP_KEYS` に `"jinji"` |
 | `api/user.js` | `SSO_APP_KEYS` に `"jinji"` |
 | `index.html` / `admin.html` | `APPS` にタイル定義、`SSO_APPS` に追加 |
