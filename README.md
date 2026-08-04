@@ -64,6 +64,8 @@ SSO・権限の枠組みと連動する。
 Vercel 側でドメインを割り当てたうえで、`NEXTAUTH_URL` を同じURLにすること
 （パスワード設定リンクの生成にも使うため）。
 
+本番へ出す手順は [docs/deploy.md](docs/deploy.md) にまとめてある。
+
 ## 技術スタック
 
 - Next.js 16（App Router／Server Components＋Server Actions）
