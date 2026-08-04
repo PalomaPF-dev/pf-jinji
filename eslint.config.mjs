@@ -7,6 +7,16 @@ const eslintConfig = [
   { ignores: [".next/**", "node_modules/**", "next-env.d.ts"] },
   ...coreWebVitals,
   ...typescript,
+  {
+    rules: {
+      // useActionState の第1引数（前回の状態）は使わないアクションが多い。
+      // 先頭 _ を「意図的に使わない」印として扱う。
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;
