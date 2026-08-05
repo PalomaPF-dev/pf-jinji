@@ -29,6 +29,8 @@ export default function EmployeeImportForm() {
         <p className="mt-2 text-xs text-[#909090]">
           社員番号をキーに、既にある人は更新・無い人は新規登録します（最大15MB）。
           人事システムの名簿は<strong>Excelのまま</strong>入れてください（CSVに変換すると社員番号の先頭ゼロが落ちます）。
+          社員番号と生年月日・入社年月日が載ったファイル（権限マスタ等）を入れると、
+          既存の社員に<strong>生年月日・入社日だけ</strong>を補完します（社員の新規登録や所属の変更はしません）。
         </p>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
