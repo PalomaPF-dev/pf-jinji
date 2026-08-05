@@ -28,7 +28,7 @@ export default async function OrgPlanPage({ params }: { params: Promise<{ id: st
   if (!plan) notFound();
 
   const moves = await listPlanMoves(id);
-  const { columns, unassigned } = await buildOrgChart(plan.baseDate ?? todayJST(), moves);
+  const chart = await buildOrgChart(plan.baseDate ?? todayJST(), moves);
   const editable = plan.status === "draft";
 
   return (
@@ -53,12 +53,7 @@ export default async function OrgPlanPage({ params }: { params: Promise<{ id: st
 
       {/* 配置表（印刷対象） */}
       <section className="mb-6 rounded-xl border border-[#e5e5e5] bg-white p-4">
-        <OrgChartBoard
-          columns={columns}
-          unassigned={unassigned}
-          planId={plan.id}
-          editable={editable}
-        />
+        <OrgChartBoard chart={chart} planId={plan.id} editable={editable} />
       </section>
 
       {/* 動かした人の一覧 */}
