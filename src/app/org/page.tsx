@@ -11,7 +11,7 @@ import PrintButton from "@/components/PrintButton";
 import EmptyState from "@/components/EmptyState";
 import OrgChart from "@/components/OrgChart";
 import OrgChartBoard from "@/components/OrgChartBoard";
-import { buildOrgChart } from "@/lib/orgChart";
+import { buildOrgChart, sliceChart } from "@/lib/orgChart";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,6 @@ export default async function OrgPage({
 
   // 管理者は自分の工場だけを描画する
   if (scope.orgUnitIds !== null) {
-    const set = new Set(scope.orgUnitIds);
     const findNode = (list: OrgNode[]): OrgNode | null => {
       for (const n of list) {
         if (n.id === scope.rootOrgId) return n;
@@ -50,14 +49,7 @@ export default async function OrgPage({
     };
     const rootNode = findNode(nodes);
     nodes = rootNode ? [rootNode] : [];
-    if (board) {
-      board = {
-        columns: board.columns
-          .map((c) => ({ ...c, groups: c.groups.filter((g) => set.has(g.orgUnitId)) }))
-          .filter((c) => c.groups.length > 0),
-        unassigned: [],
-      };
-    }
+    if (board) board = sliceChart(board, scope.rootOrgId);
   }
 
   return (
@@ -140,12 +132,7 @@ export default async function OrgPage({
         />
       ) : asBoard && board ? (
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-4">
-          <OrgChartBoard
-            columns={board.columns}
-            unassigned={board.unassigned}
-            planId={null}
-            editable={false}
-          />
+          <OrgChartBoard chart={board} planId={null} editable={false} />
           <p className="no-print mt-3 text-xs text-[#909090]">
             配置を組み替えるには「異動案」を作ってください。組織図の上で人を動かせます。
           </p>
