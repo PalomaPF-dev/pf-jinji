@@ -20,6 +20,12 @@ import {
   type TransferInput,
 } from "@/lib/transfers";
 import { getScope, inScope } from "@/lib/scope";
+import { readXlsx } from "@/lib/xlsx";
+import {
+  looksLikeAppendix,
+  parseAppendixSheet,
+  type AppendixImportResult,
+} from "@/lib/transferAppendix";
 import {
   ASSIGNMENT_KINDS,
   COMPANY_CAR_AFTER_KINDS,
@@ -42,6 +48,8 @@ export interface TransferActionState {
   message?: string;
   /** 入力エラーで差し戻すときの送信値。React 19 のフォーム自動リセット対策 */
   values?: FormValues;
+  /** 一括申請のExcel取込の結果（フォームが行に流し込む） */
+  appendix?: AppendixImportResult;
 }
 
 function str(form: FormData, key: string): string {
@@ -165,6 +173,47 @@ export async function createTransferAction(
   });
   revalidatePath("/transfers");
   redirect(`/transfers/${id}`);
+}
+
+/**
+ * 一括異動申請の対象者をExcelから読み込む。
+ *
+ * 作成はせず、**読み取った行を返すだけ**にしてある。取り込んだ内容を画面で
+ * 確かめてから申請できるようにするため（間違った一覧のまま申請書が起きると、
+ * 差し戻しても番号だけが残る）。
+ */
+export async function importAppendixAction(
+  _prev: TransferActionState,
+  form: FormData,
+): Promise<TransferActionState> {
+  const s = await assertJinjiSession();
+  const file = form.get("appendixFile");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "ファイルを選んでください（Excel）。" };
+  }
+  if (file.size > 10 * 1024 * 1024) return { error: "ファイルが大きすぎます（10MBまで）。" };
+
+  const defaultEffectiveDate = str(form, "effectiveDate") || new Date().toISOString().slice(0, 10);
+  const wantSheet = str(form, "appendixSheet");
+
+  try {
+    const sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
+    const sheet =
+      (wantSheet && sheets.find((x) => x.name === wantSheet)) ||
+      sheets.find(looksLikeAppendix) ||
+      sheets[0];
+    const scope = await getScope(s.grant);
+    const result = await parseAppendixSheet(sheet, {
+      defaultEffectiveDate,
+      scopeOrgIds: scope.orgUnitIds,
+    });
+    if (result.rows.length === 0) return { error: "対象者の行が見つかりませんでした。" };
+    const parts = [`${result.ready} 名を読み込みました`];
+    if (result.problems) parts.push(`取り込めない行 ${result.problems} 件`);
+    return { message: parts.join(" / "), appendix: result };
+  } catch (e) {
+    return { error: `ファイルを読み取れませんでした: ${(e as Error).message}` };
+  }
 }
 
 /** 一括異動申請（別紙）の作成。行の実体はJSONで届く。 */
