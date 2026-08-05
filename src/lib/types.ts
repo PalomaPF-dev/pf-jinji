@@ -132,6 +132,30 @@ export interface Employee {
   dutyName: string | null;
   /** 資格等級 */
   grade: string | null;
+
+  // ===== 人事システムの名簿から取り込む属性（コードと名称の対）=====
+  positionCode: string | null;
+  dutyCode: string | null;
+  gradeCode: string | null;
+  /** 職種（技能系職・技術系職 等） */
+  jobCategory: string | null;
+  jobCategoryCode: string | null;
+  /** 職群（一般職・総合職 等） */
+  jobGroup: string | null;
+  jobGroupCode: string | null;
+  /** 給与支給区分（社員（月給）・嘱託（日給月給） 等） */
+  payClass: string | null;
+  payClassCode: string | null;
+  /** 社員区分（正社員・非正社員・役員） */
+  employeeClass: string | null;
+  employeeClassCode: string | null;
+  /** 職位（正社員・嘱託社員・パート 等） */
+  positionClass: string | null;
+  positionClassCode: string | null;
+  payrollOrgCode: string | null;
+  payrollOrgName: string | null;
+  accountOrgCode: string | null;
+  accountOrgName: string | null;
   status: EmploymentStatus;
   retireDate: string | null;
   email: string | null;

@@ -11,6 +11,22 @@ import { GENDER_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+/** 値があるときだけ出す行。コードは名称の後ろに小さく添える。 */
+function OptionalRow({ label, value, code }: { label: string; value: string | null; code?: string | null }) {
+  if (!value || !value.trim()) return null;
+  return (
+    <Row
+      label={label}
+      value={
+        <>
+          {value}
+          {code && code.trim() && <span className="ml-2 font-mono text-[10px] text-[#a0a0a0]">{code}</span>}
+        </>
+      }
+    />
+  );
+}
+
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex gap-4 border-b border-[#f0f0f0] py-2.5 last:border-0">
@@ -71,10 +87,20 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <h2 className="mb-3 text-sm font-bold text-[#333333]">所属・処遇</h2>
           <dl>
             <Row label="所属" value={e.orgUnitName ?? "（未配置）"} />
-            <Row label="役職" value={e.positionName ?? "—"} />
-            <Row label="職務" value={e.dutyName ?? "—"} />
-            <Row label="等級" value={e.grade ?? "—"} />
+            <OptionalRow label="役職" value={e.positionName} code={e.positionCode} />
+            <OptionalRow label="職務" value={e.dutyName} code={e.dutyCode} />
+            <OptionalRow label="等級" value={e.grade} code={e.gradeCode} />
+            <OptionalRow label="職種" value={e.jobCategory} code={e.jobCategoryCode} />
+            <OptionalRow label="職群" value={e.jobGroup} code={e.jobGroupCode} />
+            <OptionalRow label="職位" value={e.positionClass} code={e.positionClassCode} />
+            <OptionalRow label="社員区分" value={e.employeeClass} code={e.employeeClassCode} />
+            <OptionalRow label="給与支給区分" value={e.payClass} code={e.payClassCode} />
+            <OptionalRow label="給与組織" value={e.payrollOrgName} code={e.payrollOrgCode} />
+            <OptionalRow label="会計組織" value={e.accountOrgName} code={e.accountOrgCode} />
           </dl>
+          <p className="mt-2 text-[11px] text-[#a0a0a0]">
+            人事システムの名簿にある項目のうち、値が入っているものだけを表示しています。
+          </p>
         </section>
 
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
