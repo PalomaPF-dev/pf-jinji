@@ -11,7 +11,7 @@ import PrintButton from "@/components/PrintButton";
 import EmptyState from "@/components/EmptyState";
 import OrgChart from "@/components/OrgChart";
 import OrgChartBoard from "@/components/OrgChartBoard";
-import { buildOrgChart, sliceChart } from "@/lib/orgChart";
+import { buildOrgChart, limitChartDepth, sliceChart } from "@/lib/orgChart";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +22,14 @@ export const dynamic = "force-dynamic";
 export default async function OrgPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string; view?: string }>;
+  searchParams: Promise<{ asOf?: string; view?: string; levels?: string }>;
 }) {
   const s = await requireJinjiSession();
   const scope = await getScope(s.grant);
-  const { asOf, view } = await searchParams;
+  const { asOf, view, levels } = await searchParams;
   const today = todayJST();
   const baseDate = asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : today;
+  const maxLevels = levels && /^\d+$/.test(levels) ? Number(levels) : null;
 
   // 既定は実物の様式に合わせた配置表。ツリーは view=tree で見られる。
   const asBoard = view !== "tree";
@@ -51,6 +52,12 @@ export default async function OrgPage({
     nodes = rootNode ? [rootNode] : [];
     if (board) board = sliceChart(board, scope.rootOrgId);
   }
+
+  // 階層の絞り込み（配置表のみ）。選択肢は絞る前の深さから作る
+  const totalLevels = board
+    ? board.maxDepth - (board.roots.length ? Math.min(...board.roots.map((r) => r.depth)) : 0) + 1
+    : 1;
+  if (board && maxLevels) board = limitChartDepth(board, maxLevels);
 
   return (
     <div className={`mx-auto px-4 py-8 ${asBoard ? "max-w-[1600px]" : "max-w-6xl"}`}>
@@ -94,6 +101,24 @@ export default async function OrgPage({
             defaultValue={baseDate}
             className="rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#2563eb]"
           />
+        </div>
+        <div>
+          <label htmlFor="levels" className="mb-1 block text-xs font-medium text-[#707070]">
+            階層
+          </label>
+          <select
+            id="levels"
+            name="levels"
+            defaultValue={maxLevels ? String(maxLevels) : ""}
+            className="rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#2563eb]"
+          >
+            <option value="">すべての階層</option>
+            {Array.from({ length: Math.max(totalLevels - 1, 0) }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>
+                第{n}階層まで
+              </option>
+            ))}
+          </select>
         </div>
         <div>
           <label htmlFor="view" className="mb-1 block text-xs font-medium text-[#707070]">
