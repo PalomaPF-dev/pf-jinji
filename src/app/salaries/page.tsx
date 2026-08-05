@@ -8,6 +8,7 @@ import { formatYen, formatYearMonth } from "@/lib/format";
 import { salaryTotal } from "@/lib/types";
 import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
+import BonusImportForm from "@/components/BonusImportForm";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,10 @@ export default async function SalariesPage() {
           給与情報は閲覧・更新のすべてを監査ログに記録しています。
           社員名をクリックすると改定履歴の確認と新しい改定の登録ができます。
         </p>
+      </div>
+
+      <div className="mb-6">
+        <BonusImportForm canEvaluation={s.grant.canEvaluation} />
       </div>
 
       {rows.length === 0 ? (
