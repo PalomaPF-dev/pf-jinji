@@ -212,11 +212,16 @@ export async function buildOrgChart(
     host.people.push(person);
   }
 
-  // 枠の中の並び: 長（統合分）→ 自組織、その中では役職の序列の上から。同順位はカナ順のまま
+  // 枠の中の並び: 長（統合分）→ 自組織、その中では役職の序列の上から。同順位はカナ順のまま。
+  // ただし**グループ長は役職の序列に関わらず職場の一番上**（職場の長という運用のため）。
+  // グループ長は役職ではなく職務（「グループ長（工場）」等）に入っているので、両方を見る。
+  const isGroupLeader = (p: ChartPerson) =>
+    /グループ長|ｸﾞﾙｰﾌﾟ長/.test(`${p.positionName ?? ""} ${p.dutyName ?? ""}`);
   const sortPeople = (node: ChartNode) => {
     node.people.sort(
       (a, b) =>
         (unitRank.get(a.orgUnitId) ?? 99) - (unitRank.get(b.orgUnitId) ?? 99) ||
+        (isGroupLeader(b) ? 1 : 0) - (isGroupLeader(a) ? 1 : 0) ||
         positionRank(a.positionName) - positionRank(b.positionName),
     );
     for (const c of node.children) sortPeople(c);

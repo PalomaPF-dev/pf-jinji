@@ -213,7 +213,7 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
     }
   }
 
-  // ===== 所属組織（8桁の葉） =====
+  // ===== 所属組織（8桁の葉) =====
   // 階層4の親候補: 同じ部署の階層3が1つだけならそれ
   const level3ByDept = new Map<string, HierRow[]>();
   for (const r of rows) {
@@ -224,7 +224,22 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
     }
   }
 
-  // 階層の浅い順に upsert する（階層4の親になる階層3を先に確定させるため）
+  // 工場の「安全推進工場長室」。工場ではこれを階層3に置き、他の職場は
+  // その下（階層4）へぶら下げる（工場長・工場長代理・工場長付は工場直下のまま）。
+  const isFactoryDept = new Map<string, boolean>();
+  for (const d of depts.values()) {
+    const name = [...d.names.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    isFactoryDept.set(d.code, name.endsWith("工場"));
+  }
+  const safetyRoomByDept = new Map<string, HierRow>();
+  for (const r of rows) {
+    if (r.deptCode && isFactoryDept.get(r.deptCode) && /安全推進工場長室/.test(r.orgName)) {
+      safetyRoomByDept.set(r.deptCode, r);
+    }
+  }
+  const isFactoryHeadUnit = (name: string) => /工場長(付|代理)?$/.test(name.replace(/[\s　]+/g, ""));
+
+  // 階層の浅い順・安全推進工場長室を先に upsert する（他の職場の親になるため）
   const newLeafByCode = new Map<string, { id: string }>();
 
   const parentOf = (r: HierRow): string => {
@@ -239,10 +254,24 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
         if (parent) return parent.id as string;
       }
     }
+    // 工場の職場は安全推進工場長室の下（安全推進が階層3、他が階層4）。
+    // 工場長・工場長代理・工場長付は工場直下に残す（組織図で工場の枠に統合するため）。
+    const safety = safetyRoomByDept.get(r.deptCode);
+    if (
+      safety &&
+      safety.orgCode !== r.orgCode &&
+      !isFactoryHeadUnit(r.orgName)
+    ) {
+      const parent: any = byCode.get(safety.orgCode) ?? newLeafByCode.get(safety.orgCode);
+      if (parent) return parent.id as string;
+    }
     return group;
   };
 
-  const ordered = [...rows].sort((a, b) => a.level - b.level);
+  const isSafety = (r: HierRow) => safetyRoomByDept.get(r.deptCode ?? "")?.orgCode === r.orgCode;
+  const ordered = [...rows].sort(
+    (a, b) => a.level - b.level || (isSafety(b) ? 1 : 0) - (isSafety(a) ? 1 : 0),
+  );
   for (const r of ordered) {
     const existing = byCode.get(r.orgCode) ?? newLeafByCode.get(r.orgCode);
     const parentId = parentOf(r);
