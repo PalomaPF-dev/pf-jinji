@@ -62,7 +62,14 @@ export async function GET(req: NextRequest) {
     const expected = createHmac("sha256", provisionKey).update(payload).digest("hex");
     if (!safeEqual(sig, expected)) return fail("署名が一致しない（PF_PROVISION_KEY の不一致か改ざん）");
 
-    let data: { loginId?: unknown; name?: unknown; app?: unknown; exp?: unknown };
+    let data: {
+      loginId?: unknown;
+      name?: unknown;
+      role?: unknown;
+      canManage?: unknown;
+      app?: unknown;
+      exp?: unknown;
+    };
     try {
       data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     } catch {
@@ -100,6 +107,14 @@ export async function GET(req: NextRequest) {
     }
     const user = rows[0];
     if (!user) return fail("アカウントを作成できなかった");
+
+    // ポータルが保証した管理者権限を保存する。入室判定は毎回この列をDBから引くので
+    // （JWTには載せない）、ポータルで管理者を外せば次の操作から即座に効く。
+    const portalRole = data.role === "admin" ? "admin" : "member";
+    const portalCanManage = data.canManage === true;
+    await sql`
+      UPDATE users SET role = ${portalRole}, can_manage = ${portalCanManage}
+      WHERE id = ${user.id}`;
 
     // authorize → jwt コールバック通過後と同一フィールドのトークンを構築
     const sessionToken = await encode({

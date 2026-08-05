@@ -91,6 +91,9 @@ export async function POST(req: Request) {
         const email = ((u?.email ?? "").toString().trim().toLowerCase() as string) || null;
         // 役割は 管理者(admin) / 一般(member) の2種。未知の値は member に丸める。
         const role: "admin" | "member" = u?.role === "admin" ? "admin" : "member";
+        // ポータルの設定担当者フラグ。本アプリの入室可否に効く（lib/session.ts）。
+        // 契約に無い旧ポータルからは届かないので、その場合は false（role だけで判定される）。
+        const canManage = u?.canManage === true;
         if (email && (!isEmail(email) || email.length > 254)) {
           results.push({ loginId, status: "error", message: "メールアドレスの形式が正しくありません。" });
           continue;
@@ -117,6 +120,7 @@ export async function POST(req: Request) {
             UPDATE users SET
               name = COALESCE(NULLIF(${name}, ''), name),
               role = ${role},
+              can_manage = ${canManage},
               approver_login_id = ${approverLoginId},
               email = COALESCE(${email}, email)
             WHERE id = ${userId}`;
@@ -154,6 +158,7 @@ export async function POST(req: Request) {
         }
 
         const userId = await createInvitedUser(companyId, loginId, email, name, role);
+        await sql`UPDATE users SET can_manage = ${canManage} WHERE id = ${userId}`;
         if (approverLoginId) {
           await sql`UPDATE users SET approver_login_id = ${approverLoginId} WHERE id = ${userId}`;
         }

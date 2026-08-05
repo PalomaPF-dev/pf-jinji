@@ -11,7 +11,7 @@ const NEED_MESSAGE: Record<string, string> = {
 };
 
 /**
- * 利用許可名簿に載っていない、または個別権限が足りないときの案内。
+ * ポータルの管理者権限が無い、または個別権限が足りないときの案内。
  * 「なぜ入れないのか」と「誰に頼めばよいか」だけを出す。人事データは一切表示しない。
  */
 export default async function ForbiddenPage({
@@ -23,7 +23,7 @@ export default async function ForbiddenPage({
   const session = await getServerSession(authOptions);
   const message =
     (need && NEED_MESSAGE[need]) ??
-    "PF人事管理は、生産・調達統括本部の人事担当者のみが利用できるアプリです。";
+    "PF人事管理は、ポータルの管理者（管理者権限またはポータル管理権限を持つ方）のみが利用できるアプリです。";
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
@@ -39,7 +39,9 @@ export default async function ForbiddenPage({
           </p>
         )}
         <p className="mt-4 text-xs text-[#909090]">
-          利用が必要な場合は、人事の責任者に利用許可名簿への登録を依頼してください。
+          {need
+            ? "この権限が必要な場合は、人事の責任者に利用許可名簿での付与を依頼してください。"
+            : "利用が必要な場合は、ポータルの管理者に管理者権限の付与を依頼してください。"}
         </p>
         <a
           href="https://portal.paloma-pf.com/"

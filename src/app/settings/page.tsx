@@ -43,8 +43,10 @@ export default async function SettingsPage({
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-[#f0e2c8] bg-[#fdfaf3] p-4 text-xs text-[#a06a12]">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
-              この名簿が、PF人事管理を使える人のすべてです。ポータルの権限とは独立しており、
-              ここから外すと、その社員番号はログインできてもアプリを開けなくなります。
+              アプリに<strong>入れるかどうか</strong>は、ポータルの管理者権限（管理者／ポータル管理権限）で決まります。
+              この名簿は、そのうえで<strong>どこまで見られるか</strong>を決めるものです。
+              名簿に無いポータル管理者も、人事マスター・組織図・申請書・資格までは扱えます。
+              給与と人事考課は、ここで個別に許可した人だけが開けます。
             </p>
           </div>
 

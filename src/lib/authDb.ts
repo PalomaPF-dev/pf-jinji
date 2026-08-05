@@ -35,6 +35,9 @@ export async function ensureAuthSchema(): Promise<void> {
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS factory TEXT`;
   // ポータルで指定された承認者の login_id。本アプリでは未使用だが契約互換のため保持する。
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS approver_login_id TEXT`;
+  // ポータルの設定担当者フラグ（pf_portal_users.can_manage）。SSO とプロビジョニングの
+  // 両方から届き、本アプリの入室可否をこれと role で判定する（lib/session.ts）。
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_manage BOOLEAN NOT NULL DEFAULT false`;
   // 社員番号ログイン用。email は任意項目。
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_id TEXT`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS users_login_id_idx ON users(login_id)`;

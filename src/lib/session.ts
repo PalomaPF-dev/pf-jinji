@@ -9,11 +9,22 @@ import type { JinjiGrant } from "./types";
  * アクセス制御は二段構え。
  *
  *   ゲート1（ログイン）  … next-auth。社員番号＋パスワード、またはポータルからのSSO。
- *   ゲート2（利用許可）  … jinji_admins 名簿。ここに載っていない社員番号は、
- *                          ログインできてもアプリを使えない（/forbidden へ）。
+ *   ゲート2（利用許可）  … **ポータルの管理者権限**。ポータルで管理者（role=admin）か
+ *                          設定担当者（can_manage）である人だけがアプリを使える。
+ *                          満たさない社員番号は、ログインできても /forbidden へ。
  *
- * 名簿は JWT に載せず **毎回 DB から引く**。権限を外した瞬間に、手元に残っている
- * セッションでも即座に効かせるため（ポータルの requireManageSession と同じ思想）。
+ * ポータルの権限は SSO とプロビジョニングの両方で届き、users テーブルに保存する。
+ * 判定は JWT に載せず **毎回 DB から引く**。ポータルで管理者を外した瞬間に、手元に
+ * 残っているセッションでも即座に効かせるため（ポータルの requireManageSession と同じ思想）。
+ *
+ * jinji_admins 名簿は「入室できるか」ではなく **どこまで見られるか** を決める役に変えた。
+ *   - is_owner       … 名簿・各種マスターを編集できる（人事の責任者）
+ *   - can_payroll    … 基本給与
+ *   - can_evaluation … 人事考課
+ * 名簿に無いポータル管理者は、人事マスター・組織図・申請書・資格までを扱える。
+ *
+ * ただし **is_owner は入室も許す**。責任者を締め出すと名簿そのものを直せなくなり、
+ * アプリが誰にも管理できない状態に陥るため、ここだけは逃げ道を残してある。
  */
 
 export interface JinjiSession {
@@ -52,23 +63,38 @@ async function baseSession() {
 }
 
 /**
- * 利用許可名簿を引く。載っていなければ null。
- * is_owner は名簿の管理者。給与・考課は個別フラグだが、owner は常に見られる。
+ * 入室可否と権限を1回のDBアクセスで決める。使えないなら null。
+ *
+ * 入室できるのは次のいずれか。
+ *   - ポータルの管理者（users.role = 'admin'）
+ *   - ポータルの設定担当者（users.can_manage）
+ *   - 人事の責任者（jinji_admins.is_owner）… 名簿を直せる人を締め出さないための逃げ道
  */
 export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   if (!loginId) return null;
   await ensureSchema();
   const sql = getSql();
   const rows = await sql`
-    SELECT login_id, name, is_owner, can_payroll, can_evaluation
-    FROM jinji_admins WHERE login_id = ${loginId} LIMIT 1`;
+    SELECT u.role, u.can_manage,
+           a.login_id AS admin_login_id, a.name AS admin_name,
+           a.is_owner, a.can_payroll, a.can_evaluation
+    FROM users u
+    LEFT JOIN jinji_admins a ON a.login_id = u.login_id
+    WHERE u.login_id = ${loginId}
+    LIMIT 1`;
   const r = rows[0];
   if (!r) return null;
+
+  const isPortalAdmin = r.role === "admin" || Boolean(r.can_manage);
   const isOwner = Boolean(r.is_owner);
+  if (!isPortalAdmin && !isOwner) return null;
+
   return {
-    loginId: r.login_id as string,
-    name: (r.name as string) ?? loginId,
+    loginId,
+    name: (r.admin_name as string | null) ?? loginId,
+    isPortalAdmin,
     isOwner,
+    // 給与・考課はポータル管理者でも自動では付かない。人事側で個別に許可する。
     canPayroll: isOwner || Boolean(r.can_payroll),
     canEvaluation: isOwner || Boolean(r.can_evaluation),
   };

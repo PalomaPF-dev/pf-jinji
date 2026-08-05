@@ -31,7 +31,8 @@ export default async function SetupPage() {
           <p className="text-[11px] tracking-[0.08em] text-[#707070]">株式会社パロマ</p>
           <h1 className="text-lg font-bold text-[#333333]">PF人事管理 初期セットアップ</h1>
           <p className="mt-2 text-xs text-[#909090]">
-            最初の1人（人事の責任者）を登録します。以後の利用者は設定画面から追加してください。
+            最初の1人（人事の責任者）を登録します。アプリに入れるのはポータルの管理者ですが、
+            給与・人事考課の許可を出す責任者はここで決めます。
           </p>
         </div>
         <div className="rounded-xl border border-[#e5e5e5] bg-white p-6">
