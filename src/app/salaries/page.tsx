@@ -50,7 +50,7 @@ export default async function SalariesPage() {
         <EmptyState title="社員が登録されていません" description="先に社員台帳を整備してください。" />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[1080px] text-sm">
             <thead>
               <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
                 <th className="px-4 py-3 font-medium">社員番号</th>
@@ -58,7 +58,9 @@ export default async function SalariesPage() {
                 <th className="px-4 py-3 font-medium">所属</th>
                 <th className="px-4 py-3 font-medium">等級/号俸</th>
                 <th className="px-4 py-3 text-right font-medium">基本給</th>
+                <th className="px-4 py-3 text-right font-medium">手当計</th>
                 <th className="px-4 py-3 text-right font-medium">支給計</th>
+                <th className="px-4 py-3 font-medium">内訳（手当）</th>
                 <th className="px-4 py-3 font-medium">適用</th>
               </tr>
             </thead>
@@ -78,8 +80,16 @@ export default async function SalariesPage() {
                   <td className="px-4 py-3 text-right text-[#333333]">
                     {r.salary ? formatYen(r.salary.baseSalary) : <span className="text-[#c0392b]">未登録</span>}
                   </td>
+                  <td className="px-4 py-3 text-right text-[#555555]">
+                    {r.salary ? formatYen(salaryTotal(r.salary) - r.salary.baseSalary) : "—"}
+                  </td>
                   <td className="px-4 py-3 text-right font-medium text-[#333333]">
                     {r.salary ? formatYen(salaryTotal(r.salary)) : "—"}
+                  </td>
+                  <td className="max-w-[340px] px-4 py-3 text-[10px] leading-relaxed text-[#707070]">
+                    {r.salary && r.salary.allowances.length > 0
+                      ? r.salary.allowances.map((a) => `${a.name} ${formatYen(a.amount)}`).join("、")
+                      : "—"}
                   </td>
                   <td className="px-4 py-3 text-xs text-[#909090]">
                     {r.salary ? formatYearMonth(r.salary.effectiveFrom) : "—"}
