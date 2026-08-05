@@ -2,9 +2,9 @@
 
 import { useActionState, useState } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Users } from "lucide-react";
+import { FileSpreadsheet, Plus, Trash2, Users } from "lucide-react";
 import SubmitButton from "./SubmitButton";
-import type { TransferActionState } from "@/app/transfers/actions";
+import { importAppendixAction, type TransferActionState } from "@/app/transfers/actions";
 import { buildTargetPicker, type EmployeeChoice, type OrgOption } from "./TransferForm";
 import { TRANSFER_REASON_SUGGESTIONS } from "@/lib/types";
 
@@ -36,11 +36,39 @@ export default function BulkTransferForm({
   orgOptions: OrgOption[];
 }) {
   const [state, formAction] = useActionState(action, {} as TransferActionState);
+  const [importState, importFormAction] = useActionState(
+    importAppendixAction,
+    {} as TransferActionState,
+  );
 
   const [formDate, setFormDate] = useState("");
   const [commonDate, setCommonDate] = useState("");
   const [commonReason, setCommonReason] = useState("");
   const [rows, setRows] = useState<RowState[]>([]);
+
+  // Excelから読み込めた行を、そのまま別紙の行にする（同じ人は上書きしない）。
+  // レンダー中に「props（アクション結果）の変化へ state を合わせる」パターン。
+  const [seenImport, setSeenImport] = useState(importState.appendix);
+  if (importState.appendix !== seenImport) {
+    setSeenImport(importState.appendix);
+    const add = (importState.appendix?.rows ?? []).filter((r) => !r.problem && r.employeeId);
+    if (add.length > 0) {
+      setRows((prev) => {
+        const has = new Set(prev.map((r) => r.employeeId));
+        return [
+          ...prev,
+          ...add
+            .filter((r) => !has.has(r.employeeId!))
+            .map((r) => ({
+              employeeId: r.employeeId!,
+              toOrgUnitId: r.toOrgUnitId ?? "",
+              effectiveDate: r.effectiveDate,
+              reason: r.reason,
+            })),
+        ];
+      });
+    }
+  }
 
   // 追加用の絞り込み
   const picker = buildTargetPicker(employees);
@@ -81,6 +109,69 @@ export default function BulkTransferForm({
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
   return (
+    <div className="space-y-6">
+      {/* ===== Excelからの一括取込 =====
+          申請のフォームとは別のフォームにしてある（HTMLはフォームを入れ子にできない）。 */}
+      <form action={importFormAction} className="rounded-xl border border-[#e5e5e5] bg-white p-5">
+        <h2 className="mb-1 flex items-center gap-2 text-sm font-bold text-[#333333]">
+          <FileSpreadsheet className="h-4 w-4" />
+          Excelから一括で読み込む
+        </h2>
+        <p className="mb-4 text-xs text-[#707070]">
+          別紙の一覧表（個人コード・新所属組織コード・異動日・理由）をそのまま読み込めます。
+          出力した別紙のExcelも読み戻せます。読み込んだ行は下の別紙に追加され、
+          <strong>この時点では申請しません</strong>（内容を確かめてから申請してください）。
+        </p>
+        <input type="hidden" name="effectiveDate" value={commonDate} />
+        <div className="flex flex-wrap items-end gap-3">
+          <input
+            name="appendixFile"
+            type="file"
+            accept=".xlsx"
+            required
+            className="rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-[#f0f0f0] file:px-3 file:py-1.5 file:text-xs"
+          />
+          <input
+            name="appendixSheet"
+            placeholder="シート名（任意）"
+            className="w-[180px] rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#2563eb]"
+          />
+          <SubmitButton variant="secondary">読み込む</SubmitButton>
+        </div>
+        {importState.error && (
+          <p className="mt-3 rounded-lg bg-[#fdecec] px-3 py-2 text-sm text-[#b91c1c]">{importState.error}</p>
+        )}
+        {importState.message && (
+          <p className="mt-3 rounded-lg bg-[#e8f3ec] px-3 py-2 text-sm text-[#1c7a4d]">{importState.message}</p>
+        )}
+        {importState.appendix && importState.appendix.problems > 0 && (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-[#f0d9d9]">
+            <table className="w-full min-w-[520px] text-xs">
+              <thead>
+                <tr className="border-b border-[#f0d9d9] bg-[#fdf6f6] text-left text-[#b91c1c]">
+                  <th className="px-3 py-1.5 font-medium">行</th>
+                  <th className="px-3 py-1.5 font-medium">社員番号</th>
+                  <th className="px-3 py-1.5 font-medium">氏名</th>
+                  <th className="px-3 py-1.5 font-medium">取り込めなかった理由</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importState.appendix.rows
+                  .filter((r) => r.problem)
+                  .map((r) => (
+                    <tr key={r.rowNo} className="border-b border-[#f7f0f0] last:border-0">
+                      <td className="px-3 py-1.5 text-[#707070]">{r.rowNo}</td>
+                      <td className="px-3 py-1.5 font-mono text-[#707070]">{r.employeeNo}</td>
+                      <td className="px-3 py-1.5 text-[#555555]">{r.employeeName || "—"}</td>
+                      <td className="px-3 py-1.5 text-[#555555]">{r.problem}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </form>
+
     <form action={formAction} className="space-y-6">
       {/* 行の実体はJSONで送る */}
       <input type="hidden" name="items" value={JSON.stringify(rows)} />
@@ -330,5 +421,6 @@ export default function BulkTransferForm({
         </Link>
       </div>
     </form>
+    </div>
   );
 }
