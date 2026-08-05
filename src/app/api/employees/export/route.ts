@@ -3,7 +3,12 @@ import { getOptionalGrant } from "@/lib/session";
 import { getScope } from "@/lib/scope";
 import { recordAudit } from "@/lib/audit";
 import { toCsv } from "@/lib/csv";
-import { EMPLOYEE_CSV_HEADERS, employeeToCsvRow, listEmployees } from "@/lib/employees";
+import {
+  EMPLOYEE_CSV_HEADERS,
+  employeeToCsvRow,
+  listEmployees,
+  normalizeEmployeeSort,
+} from "@/lib/employees";
 import { listOrgUnits } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
 import type { EmploymentStatus } from "@/lib/types";
@@ -24,6 +29,9 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q") ?? "";
   const org = req.nextUrl.searchParams.get("org") ?? "";
   const status = req.nextUrl.searchParams.get("status") ?? "active";
+  // 画面の並び順のまま出す（見えている順と出力の順を揃える）
+  const sort = normalizeEmployeeSort(req.nextUrl.searchParams.get("sort") ?? undefined);
+  const desc = req.nextUrl.searchParams.get("desc") === "1";
   const scope = await getScope(grant);
 
   const [employees, orgUnits] = await Promise.all([
@@ -32,6 +40,8 @@ export async function GET(req: NextRequest) {
       orgUnitId: org || null,
       status: (status === "all" ? "all" : status) as EmploymentStatus | "all",
       scopeOrgIds: scope.orgUnitIds,
+      sort,
+      desc,
     }),
     listOrgUnits(),
   ]);

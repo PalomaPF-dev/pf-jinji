@@ -9,9 +9,15 @@ import {
   type TransferStatus,
 } from "@/lib/types";
 
+/**
+ * 状態バッジ。一覧の行を詰めて表示できるよう、行の高さを字の高さに揃える
+ * （leading-5 を付けないと親の行間を継いで縦に伸びる）。
+ */
 function Pill({ text, className }: { text: string; className: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${className}`}>
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs leading-5 font-medium ${className}`}
+    >
       {text}
     </span>
   );

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Download, Plus, Upload } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
-import { listEmployees } from "@/lib/employees";
+import { listEmployees, normalizeEmployeeSort, type EmployeeSortKey } from "@/lib/employees";
 import { activeOn, buildOrgTree, flattenTree, listOrgUnits, memberCountsByOrg } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
 import { ageAt, formatDate } from "@/lib/format";
@@ -13,16 +13,58 @@ import { EMPLOYMENT_STATUS_LABEL, EMPLOYMENT_STATUS_ORDER, type EmploymentStatus
 
 export const dynamic = "force-dynamic";
 
+/**
+ * 並び替えのできる見出し。押すたびに 昇順 → 降順 を切り替える。
+ * 絞り込みの条件（検索語・所属・在籍）はリンクに引き継ぐ。
+ */
+function SortTh({
+  label,
+  col,
+  sort,
+  desc,
+  params,
+}: {
+  label: string;
+  col: EmployeeSortKey;
+  sort: EmployeeSortKey;
+  desc: boolean;
+  params: Record<string, string>;
+}) {
+  const active = sort === col;
+  const nextDesc = active && !desc;
+  const qs = new URLSearchParams({ ...params, sort: col, ...(nextDesc ? { desc: "1" } : {}) });
+  return (
+    <th className="px-3 py-2 font-medium">
+      <Link
+        href={`/employees?${qs.toString()}`}
+        className={`inline-flex items-center gap-0.5 hover:text-[#2563eb] ${active ? "text-[#2563eb]" : ""}`}
+      >
+        {label}
+        <span className="text-[9px]">{active ? (desc ? "▼" : "▲") : "↕"}</span>
+      </Link>
+    </th>
+  );
+}
+
 /** 社員台帳の一覧。検索・所属・在籍状態で絞り込む。 */
 export default async function EmployeesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; org?: string; status?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    org?: string;
+    status?: string;
+    sort?: string;
+    desc?: string;
+  }>;
 }) {
   const s = await requireJinjiSession();
   const scope = await getScope(s.grant);
-  const { q = "", org = "", status = "active" } = await searchParams;
+  const { q = "", org = "", status = "active", sort: sortRaw, desc: descRaw } = await searchParams;
   const today = todayJST();
+  const sort = normalizeEmployeeSort(sortRaw);
+  const desc = descRaw === "1";
+  const sortProps = { sort, desc, params: { q, org, status } };
 
   const [employees, orgUnits, counts] = await Promise.all([
     listEmployees({
@@ -30,6 +72,8 @@ export default async function EmployeesPage({
       orgUnitId: org || null,
       status: (status === "all" ? "all" : status) as EmploymentStatus | "all",
       scopeOrgIds: scope.orgUnitIds,
+      sort,
+      desc,
     }),
     listOrgUnits(),
     memberCountsByOrg(),
@@ -55,7 +99,7 @@ export default async function EmployeesPage({
               CSV取込
             </Link>
             <a
-              href={`/api/employees/export?q=${encodeURIComponent(q)}&org=${encodeURIComponent(org)}&status=${encodeURIComponent(status)}`}
+              href={`/api/employees/export?q=${encodeURIComponent(q)}&org=${encodeURIComponent(org)}&status=${encodeURIComponent(status)}&sort=${sort}${desc ? "&desc=1" : ""}`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
             >
               <Download className="h-4 w-4" />
@@ -80,6 +124,9 @@ export default async function EmployeesPage({
       )}
 
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-[#e5e5e5] bg-white p-4">
+        {/* 絞り込みを変えても並び順は保つ */}
+        <input type="hidden" name="sort" value={sort} />
+        {desc && <input type="hidden" name="desc" value="1" />}
         <div className="min-w-[180px] flex-1">
           <label htmlFor="q" className="mb-1 block text-xs font-medium text-[#707070]">
             検索（社員番号・氏名・カナ・役職・職務）
@@ -143,35 +190,35 @@ export default async function EmployeesPage({
         />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
-          <table className="w-full min-w-[840px] text-sm">
+          <table className="w-full min-w-[900px] text-[13px] leading-5">
             <thead>
               <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
-                <th className="px-4 py-3 font-medium">社員番号</th>
-                <th className="px-4 py-3 font-medium">氏名</th>
-                <th className="px-4 py-3 font-medium">所属</th>
-                <th className="px-4 py-3 font-medium">役職</th>
-                <th className="px-4 py-3 font-medium">職務</th>
-                <th className="px-4 py-3 font-medium">入社日</th>
-                <th className="px-4 py-3 font-medium">年齢</th>
-                <th className="px-4 py-3 font-medium">在籍</th>
+                <SortTh label="社員番号" col="employeeNo" {...sortProps} />
+                <SortTh label="氏名" col="name" {...sortProps} />
+                <SortTh label="所属" col="org" {...sortProps} />
+                <SortTh label="役職" col="position" {...sortProps} />
+                <SortTh label="職務" col="duty" {...sortProps} />
+                <SortTh label="入社日" col="hireDate" {...sortProps} />
+                <SortTh label="年齢" col="birthDate" {...sortProps} />
+                <SortTh label="在籍" col="status" {...sortProps} />
               </tr>
             </thead>
             <tbody>
               {employees.map((e) => (
                 <tr key={e.id} className="border-b border-[#f0f0f0] last:border-0 hover:bg-[#fafafa]">
-                  <td className="px-4 py-3 font-mono text-xs text-[#707070]">{e.employeeNo}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-1 font-mono text-[11px] text-[#707070]">{e.employeeNo}</td>
+                  <td className="px-3 py-1 whitespace-nowrap">
                     <Link href={`/employees/${e.id}`} className="font-medium text-[#2563eb] hover:underline">
                       {e.name}
                     </Link>
-                    {e.nameKana && <div className="text-xs text-[#909090]">{e.nameKana}</div>}
+                    {e.nameKana && <span className="ml-2 text-xs text-[#909090]">{e.nameKana}</span>}
                   </td>
-                  <td className="px-4 py-3 text-[#555555]">{e.orgUnitName ?? "（未配置）"}</td>
-                  <td className="px-4 py-3 text-[#555555]">{e.positionName ?? "—"}</td>
-                  <td className="px-4 py-3 text-[#555555]">{e.dutyName ?? "—"}</td>
-                  <td className="px-4 py-3 text-[#707070]">{formatDate(e.hireDate)}</td>
-                  <td className="px-4 py-3 text-[#707070]">{ageAt(e.birthDate, today) ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-1 text-[#555555]">{e.orgUnitName ?? "（未配置）"}</td>
+                  <td className="px-3 py-1 text-[#555555]">{e.positionName ?? "—"}</td>
+                  <td className="px-3 py-1 text-[#555555]">{e.dutyName ?? "—"}</td>
+                  <td className="px-3 py-1 whitespace-nowrap text-[#707070]">{formatDate(e.hireDate)}</td>
+                  <td className="px-3 py-1 text-[#707070]">{ageAt(e.birthDate, today) ?? "—"}</td>
+                  <td className="px-3 py-1">
                     <EmploymentStatusBadge status={e.status} />
                   </td>
                 </tr>

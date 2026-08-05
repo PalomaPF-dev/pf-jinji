@@ -62,11 +62,81 @@ export interface EmployeeFilter {
   status?: EmploymentStatus | "all";
   /** 表示範囲（管理者の工場スコープ）。null は全体 */
   scopeOrgIds?: string[] | null;
+  /** 並び替える列。未指定はカナ順 */
+  sort?: EmployeeSortKey;
+  /** true で降順 */
+  desc?: boolean;
+}
+
+/**
+ * 一覧で並び替えられる列。
+ * 値は画面のクエリ文字列にそのまま出るので、短く分かる語にしてある。
+ */
+export const EMPLOYEE_SORT_KEYS = [
+  "name",
+  "employeeNo",
+  "org",
+  "position",
+  "duty",
+  "hireDate",
+  "birthDate",
+  "status",
+] as const;
+export type EmployeeSortKey = (typeof EMPLOYEE_SORT_KEYS)[number];
+
+export function normalizeEmployeeSort(v: string | undefined): EmployeeSortKey {
+  return (EMPLOYEE_SORT_KEYS as readonly string[]).includes(v ?? "")
+    ? (v as EmployeeSortKey)
+    : "name";
+}
+
+/**
+ * 並び替えは取得後に JS で行う。
+ *
+ * SQL の ORDER BY を動的に組むと、外から来た文字列を SQL に混ぜる形になりやすい。
+ * また日本語（カナ・漢字）の並びは Postgres の照合順序より
+ * localeCompare(..., "ja") のほうが期待どおりになる。
+ * 一覧は最大でも本部の人数（約1,700件）なので、取得後に並べても軽い。
+ *
+ * 空欄は昇順・降順のどちらでも末尾に置く（空欄が先頭に来る一覧は探しづらいため）。
+ */
+function sortEmployees(list: Employee[], sort: EmployeeSortKey, desc: boolean): Employee[] {
+  const keyOf = (e: Employee): string | null => {
+    switch (sort) {
+      case "employeeNo":
+        return e.employeeNo;
+      case "org":
+        return e.orgUnitName;
+      case "position":
+        return e.positionName;
+      case "duty":
+        return e.dutyName;
+      case "hireDate":
+        return e.hireDate;
+      case "birthDate":
+        return e.birthDate;
+      case "status":
+        return String(EMPLOYMENT_STATUS_ORDER.indexOf(e.status)).padStart(2, "0");
+      default:
+        // 氏名はカナがあればカナ順。無ければ氏名そのもので並べる
+        return e.nameKana || e.name;
+    }
+  };
+  const dir = desc ? -1 : 1;
+  return [...list].sort((a, b) => {
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    if (!ka && !kb) return a.employeeNo.localeCompare(b.employeeNo, "ja");
+    if (!ka) return 1;
+    if (!kb) return -1;
+    const c = ka.localeCompare(kb, "ja", { numeric: true });
+    return c !== 0 ? c * dir : a.employeeNo.localeCompare(b.employeeNo, "ja");
+  });
 }
 
 /**
  * 社員一覧。既定では在籍者のみ（退職者まで出すと日常の一覧が使いづらいため）。
- * 並びはカナ順。カナ未登録の人は末尾にまとめる。
+ * 並びは既定でカナ順。カナ未登録の人は末尾にまとめる。
  */
 export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employee[]> {
   await ensureSchema();
@@ -94,7 +164,7 @@ export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employ
            OR COALESCE(e.position_name, '') ILIKE ${like}
            OR COALESCE(e.duty_name, '') ILIKE ${like})
     ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
-  return rows.map(mapEmployee);
+  return sortEmployees(rows.map(mapEmployee), normalizeEmployeeSort(filter.sort), Boolean(filter.desc));
 }
 
 export async function getEmployee(id: string): Promise<Employee | null> {
