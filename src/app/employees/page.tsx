@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Download, Plus, Upload } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { listEmployees } from "@/lib/employees";
 import { activeOn, buildOrgTree, flattenTree, listOrgUnits, memberCountsByOrg } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
@@ -18,7 +19,8 @@ export default async function EmployeesPage({
 }: {
   searchParams: Promise<{ q?: string; org?: string; status?: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
   const { q = "", org = "", status = "active" } = await searchParams;
   const today = todayJST();
 
@@ -27,17 +29,22 @@ export default async function EmployeesPage({
       q,
       orgUnitId: org || null,
       status: (status === "all" ? "all" : status) as EmploymentStatus | "all",
+      scopeOrgIds: scope.orgUnitIds,
     }),
     listOrgUnits(),
     memberCountsByOrg(),
   ]);
-  const orgOptions = flattenTree(buildOrgTree(activeOn(orgUnits, today), counts, new Map()));
+  const orgOptions = flattenTree(buildOrgTree(activeOn(orgUnits, today), counts, new Map())).filter(
+    (o) => scope.orgUnitIds === null || scope.orgUnitIds.includes(o.id),
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <PageHeader
         title="社員台帳"
-        description={`${employees.length} 件`}
+        description={
+          scope.scopeName ? `${scope.scopeName} の ${employees.length} 件` : `${employees.length} 件`
+        }
         actions={
           <>
             <Link
@@ -64,6 +71,13 @@ export default async function EmployeesPage({
           </>
         }
       />
+
+      {scope.unresolved && (
+        <p className="mb-4 rounded-xl border border-[#f0e2c8] bg-[#fdfaf3] p-4 text-xs text-[#a06a12]">
+          ご自身の社員番号が社員台帳に見つからないため、表示範囲（工場）を特定できませんでした。
+          ポータル管理者にお問い合わせください。
+        </p>
+      )}
 
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-[#e5e5e5] bg-white p-4">
         <div className="min-w-[180px] flex-1">

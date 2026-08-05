@@ -4,12 +4,13 @@ import { activeOn, buildOrgTree, flattenTree, listOrgUnits, memberCountsByOrg } 
 import { listTransferTargets } from "@/lib/transferOptions";
 import { todayJST } from "@/lib/dates";
 import PageHeader from "@/components/PageHeader";
-import TransferForm from "@/components/TransferForm";
-import { createTransferAction } from "../actions";
+import BulkTransferForm from "@/components/BulkTransferForm";
+import { createBulkTransferAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewTransferPage() {
+/** 一括異動申請（別紙つき）の作成。 */
+export default async function BulkTransferPage() {
   const s = await requireJinjiSession();
   const scope = await getScope(s.grant);
   const today = todayJST();
@@ -21,14 +22,14 @@ export default async function NewTransferPage() {
   const orgOptions = flattenTree(buildOrgTree(activeOn(orgUnits, today), counts, new Map()));
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-5xl px-4 py-8">
       <PageHeader
-        title="異動申請書の作成"
-        description="対象者を選ぶと、異動前の欄に人事マスターの現在値が入ります。"
+        title="一括異動申請（別紙）"
+        description="複数名の異動を1枚の申請書にまとめます。申請書には「別紙参照」と載り、対象者の一覧が別紙になります。"
         backHref="/transfers"
         backLabel="一覧へ戻る"
       />
-      <TransferForm action={createTransferAction} employees={employees} orgOptions={orgOptions} />
+      <BulkTransferForm action={createBulkTransferAction} employees={employees} orgOptions={orgOptions} />
     </div>
   );
 }

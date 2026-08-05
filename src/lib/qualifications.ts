@@ -85,6 +85,8 @@ export interface QualificationFilter {
   today?: string;
   /** 何日以内を「近い」とみなすか */
   withinDays?: number;
+  /** 表示範囲（管理者の工場スコープ）。null は全体 */
+  scopeOrgIds?: string[] | null;
 }
 
 export async function listQualifications(filter: QualificationFilter = {}): Promise<Qualification[]> {
@@ -92,6 +94,7 @@ export async function listQualifications(filter: QualificationFilter = {}): Prom
   const sql = getSql();
   const employeeId = filter.employeeId || null;
   const category = filter.category && filter.category !== "all" ? filter.category : null;
+  const scope = filter.scopeOrgIds ?? null;
 
   const rows = await sql`
     SELECT q.*, e.employee_no, e.name AS employee_name, o.name AS org_unit_name
@@ -100,6 +103,7 @@ export async function listQualifications(filter: QualificationFilter = {}): Prom
     LEFT JOIN jinji_org_units o ON o.id = e.org_unit_id
     WHERE (${employeeId}::uuid IS NULL OR q.employee_id = ${employeeId})
       AND (${category}::text IS NULL OR q.category = ${category})
+      AND (${scope}::uuid[] IS NULL OR e.org_unit_id = ANY(${scope}::uuid[]))
       AND e.status <> 'retired'
     ORDER BY (q.expires_on IS NULL), q.expires_on ASC, q.name ASC`;
 

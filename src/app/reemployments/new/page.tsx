@@ -1,4 +1,5 @@
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { listReemploymentTargets } from "@/lib/reemploymentOptions";
 import PageHeader from "@/components/PageHeader";
 import ReemploymentForm from "@/components/ReemploymentForm";
@@ -7,8 +8,9 @@ import { createReemploymentAction } from "../actions";
 export const dynamic = "force-dynamic";
 
 export default async function NewReemploymentPage() {
-  await requireJinjiSession();
-  const employees = await listReemploymentTargets();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
+  const employees = await listReemploymentTargets(scope.orgUnitIds);
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">

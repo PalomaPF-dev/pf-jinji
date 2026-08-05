@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getTransfer, listApprovals } from "@/lib/transfers";
+import { APPENDIX_HEADERS, buildAppendixRows, type AppendixRow } from "@/lib/transferAppendix";
 import { formatDate } from "@/lib/format";
 import { TRANSFER_COMPARISON_ROWS, TRANSFER_FORM, TRANSFER_SUBJECT_FIELDS } from "@/lib/transferForm";
 import PrintButton from "@/components/PrintButton";
@@ -35,7 +36,29 @@ export default async function TransferPrintPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const t = await getTransfer(id);
   if (!t) notFound();
-  const approvals = await listApprovals(id);
+  const [approvals, appendix] = await Promise.all([
+    listApprovals(id),
+    t.isBulk ? buildAppendixRows(id) : Promise.resolve([] as AppendixRow[]),
+  ]);
+
+  // 一括申請は【対象社員】【異動部署】に「別紙参照」と載せ、一覧は別紙として刷る
+  const subjectRows = t.isBulk
+    ? [
+        { label: "部　　　署", value: "別紙参照" },
+        { label: "社員ｺｰﾄﾞ", value: "" },
+        { label: "氏　　　名", value: `別紙参照（${appendix.length}名）` },
+      ]
+    : TRANSFER_SUBJECT_FIELDS.map((f) => ({ label: f.label, value: f.value(t) }));
+  const comparisonRows = t.isBulk
+    ? [
+        { label: "部署：", before: "別紙参照", after: "別紙参照" },
+        { label: "職務：", before: "", after: "" },
+      ]
+    : TRANSFER_COMPARISON_ROWS.map((r) => ({
+        label: r.label,
+        before: r.before(t),
+        after: r.after(t),
+      }));
 
   return (
     <div className="mx-auto max-w-[210mm] px-4 py-6">
@@ -64,12 +87,12 @@ export default async function TransferPrintPage({ params }: { params: Promise<{ 
         <Block label="【対象社員】">
           <table className="w-full border-collapse">
             <tbody>
-              {TRANSFER_SUBJECT_FIELDS.map((f) => (
+              {subjectRows.map((f) => (
                 <tr key={f.label}>
                   <th className="w-[22mm] border border-[#333] bg-[#f2f2f2] px-1 py-[3px] text-left font-normal">
                     {f.label}
                   </th>
-                  <td className="border border-[#333] px-1 py-[3px]">{f.value(t)}</td>
+                  <td className="border border-[#333] px-1 py-[3px]">{f.value || " "}</td>
                 </tr>
               ))}
             </tbody>
@@ -107,13 +130,13 @@ export default async function TransferPrintPage({ params }: { params: Promise<{ 
               </tr>
             </thead>
             <tbody>
-              {TRANSFER_COMPARISON_ROWS.map((r) => (
+              {comparisonRows.map((r) => (
                 <tr key={r.label}>
                   <td className="border border-[#333] px-1 py-[3px]">
-                    <span className="text-[#555]">{r.label}</span> {r.before(t)}
+                    <span className="text-[#555]">{r.label}</span> {r.before}
                   </td>
                   <td className="border border-[#333] px-1 py-[3px]">
-                    <span className="text-[#555]">{r.label}</span> {r.after(t)}
+                    <span className="text-[#555]">{r.label}</span> {r.after}
                   </td>
                 </tr>
               ))}
@@ -285,6 +308,45 @@ export default async function TransferPrintPage({ params }: { params: Promise<{ 
           </span>
         </p>
       </div>
+
+      {/* ===== 別紙（異動者一覧）。一括申請のみ、改ページして刷る ===== */}
+      {t.isBulk && (
+        <div
+          className="bg-white p-[10mm] text-[9px] leading-tight text-[#000] print:p-0"
+          style={{ breakBefore: "page" }}
+        >
+          <h2 className="mb-2 text-center text-[13px] font-bold">
+            異動申請書 別紙（異動者一覧） {appendix.length}名
+          </h2>
+          <p className="mb-1 text-[#555]">申請番号 {t.transferNo}</p>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {APPENDIX_HEADERS.map((h) => (
+                  <th key={h} className="border border-[#333] bg-[#f2f2f2] px-1 py-[2px] text-left font-normal">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {appendix.map((r, i) => (
+                <tr key={i}>
+                  <td className="border border-[#333] px-1 py-[2px]">{r.factory}</td>
+                  <td className="border border-[#333] px-1 py-[2px] whitespace-nowrap">{r.effectiveDate}</td>
+                  <td className="border border-[#333] px-1 py-[2px] font-mono">{r.employeeNo}</td>
+                  <td className="border border-[#333] px-1 py-[2px] whitespace-nowrap">{r.employeeName}</td>
+                  <td className="border border-[#333] px-1 py-[2px] font-mono">{r.fromCode}</td>
+                  <td className="border border-[#333] px-1 py-[2px]">{r.fromPath}</td>
+                  <td className="border border-[#333] px-1 py-[2px] font-mono">{r.toCode}</td>
+                  <td className="border border-[#333] px-1 py-[2px]">{r.toName}</td>
+                  <td className="border border-[#333] px-1 py-[2px]">{r.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* 用紙サイズはこの印刷ルート内で指定する（1ジョブに1つの @page だけ効かせる） */}
       <style>{`@media print { @page { size: A4 portrait; margin: 10mm; } }`}</style>
