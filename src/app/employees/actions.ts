@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { assertJinjiSession } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
 import { parseCsvObjects } from "@/lib/csv";
+import { readXlsx, sheetToObjects } from "@/lib/xlsx";
+import { importRoster, looksLikeRoster } from "@/lib/rosterImport";
 import {
   createEmployee,
   deleteEmployee,
@@ -146,23 +148,81 @@ export async function deleteEmployeeAction(_prev: ActionState, form: FormData): 
 }
 
 /** CSV取込。社員番号をキーに upsert し、行ごとの失敗は結果として返す。 */
+/**
+ * 社員台帳の取込。Excel(.xlsx) と CSV の両方を受ける。
+ *
+ * Excel をそのまま読めるようにしているのは、CSVに変換させると
+ * **社員番号の先頭ゼロが落ちる**（"001081" → 1081）ため。社員番号はポータルの
+ * login_id と突き合わせる鍵なので、桁が変わると連携が壊れる。
+ *
+ * 中身を見て、人事システムの名簿なら名簿用の取込へ、
+ * 従来の列（社員番号/氏名/所属コード…）ならCSV取込へ振り分ける。
+ */
 export async function importEmployeesAction(_prev: ActionState, form: FormData): Promise<ActionState> {
   const s = await assertJinjiSession();
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { error: "CSVファイルを選んでください。" };
+    return { error: "ファイルを選んでください（Excel または CSV）。" };
   }
-  if (file.size > 5 * 1024 * 1024) {
-    return { error: "ファイルが大きすぎます（5MBまで）。" };
+  if (file.size > 15 * 1024 * 1024) {
+    return { error: "ファイルが大きすぎます（15MBまで）。" };
   }
 
+  const isXlsx = /\.xlsx$/i.test(file.name);
+  const wantSheet = str(form, "sheet");
+  // 改行区切りのテキストエリアで受け取る（1つの値で届くので分割する）
+  const parentOrgNames = form
+    .getAll("parentOrgNames")
+    .flatMap((v) => v.toString().split(/\r?\n/))
+    .map((v) => v.trim())
+    .filter(Boolean);
+
   let records: Record<string, string>[];
+  let headers: string[] = [];
   try {
-    records = parseCsvObjects(await file.text());
+    if (isXlsx) {
+      const sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
+      const sheet = (wantSheet && sheets.find((x) => x.name === wantSheet)) || sheets[0];
+      headers = (sheet.rows[0] ?? []).map((h) => h.replace(/[\s　]+/g, ""));
+      records = sheetToObjects(sheet);
+    } else {
+      const text = await file.text();
+      records = parseCsvObjects(text);
+      headers = Object.keys(records[0] ?? {});
+    }
   } catch (e) {
-    return { error: `CSVを読み取れませんでした: ${(e as Error).message}` };
+    return { error: `ファイルを読み取れませんでした: ${(e as Error).message}` };
   }
   if (records.length === 0) return { error: "データ行がありません。" };
+
+  // 人事システムの名簿かどうかで取込経路を分ける
+  if (looksLikeRoster(headers)) {
+    const result = await importRoster(records, { parentOrgNames });
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_employee",
+      targetType: "employee",
+      targetLabel: "社員名簿の取込",
+      detail: {
+        created: result.created,
+        updated: result.updated,
+        orgsCreated: result.orgsCreated,
+        skipped: result.skipped,
+        errorCount: result.errors.length,
+      },
+    });
+    revalidatePath("/employees");
+    revalidatePath("/org");
+    const parts = [`新規 ${result.created} 件`, `更新 ${result.updated} 件`];
+    if (result.orgsCreated) parts.push(`組織を ${result.orgsCreated} 件作成`);
+    if (result.skipped) parts.push(`対象外 ${result.skipped} 件`);
+    if (result.errors.length) parts.push(`エラー ${result.errors.length} 件`);
+    return {
+      message: `名簿を取り込みました（${parts.join(" / ")}）`,
+      importResult: { created: result.created, updated: result.updated, errors: result.errors },
+    };
+  }
 
   const result = await importEmployeesCsv(records);
   await recordAudit({
