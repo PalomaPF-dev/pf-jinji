@@ -29,6 +29,8 @@ export interface JinjiAdmin {
 export interface JinjiGrant {
   loginId: string;
   name: string;
+  /** ポータルの管理者（role=admin）または設定担当者（can_manage）。入室の条件 */
+  isPortalAdmin: boolean;
   isOwner: boolean;
   canPayroll: boolean;
   canEvaluation: boolean;

@@ -45,16 +45,28 @@ SSO・権限の枠組みと連動する。
 | ゲート | 内容 |
 |---|---|
 | 1. ログイン | 社員番号＋パスワード（next-auth）、またはポータルからのSSO（`/api/sso`） |
-| 2. 利用許可名簿 | `jinji_admins` テーブル。**ここに載っていない社員番号は、ログインできてもアプリを使えない**（`/forbidden`） |
+| 2. ポータルの管理者権限 | ポータルで**管理者（role=admin）またはポータル管理権限（can_manage）**を持つ人だけがアプリを使える。満たさない社員番号は、ログインできても `/forbidden` |
 
-名簿の各行は次の権限を持つ。既定は人事マスター・組織図・異動申請のみで、給与と考課は個別に許可する。
+ポータル側でも二重に絞っている。人事管理のタイルは管理者にしか出ないうえ、
+起動URL（`/api/user?launch=jinji`）を直接叩いても管理者でなければ 403 になる。
 
-- `is_owner` — 名簿自体を編集できる（人事の責任者）。給与・考課も常に閲覧可
+### 名簿は「どこまで見られるか」を決める
+
+`jinji_admins` は入室条件ではなく、**入れた人がどこまで見られるか**を決める。
+
+- `is_owner` — 名簿・各種マスターを編集できる（人事の責任者）。給与・考課も常に閲覧可
 - `can_payroll` — 基本給与の閲覧・編集
 - `can_evaluation` — 人事考課の閲覧・編集
 
-権限判定は**毎回 DB を引く**（JWT には載せない）。権限を外した瞬間から、手元に残っている
-セッションでも操作できなくなる。
+名簿に無いポータル管理者も、人事マスター・組織図・申請書・資格までは扱える。
+**給与と人事考課はポータル管理者でも自動では開けない**（名簿で個別に許可する）。
+
+ただし `is_owner` は入室も許す。責任者を締め出すと名簿そのものを直せなくなり、
+アプリが誰にも管理できない状態に陥るため、ここだけは逃げ道を残してある。
+
+権限判定は**毎回 DB を引く**（JWT には載せない）。ポータルで管理者を外した瞬間から、
+手元に残っているセッションでも操作できなくなる。ポータルの権限は SSO と
+プロビジョニングの両方で届き、`users.role` / `users.can_manage` に保存される。
 
 さらに、給与・考課は**閲覧も**監査ログ（`jinji_audit_logs`）に記録する。
 
@@ -135,8 +147,8 @@ npm run build
 
 | 経路 | 内容 |
 |---|---|
-| `GET /api/sso?token=…` | ポータルからのSSO。`PF_PROVISION_KEY` で HMAC 検証。名簿に無ければ `/forbidden` へ |
-| `POST /api/provision` | ポータルからの一括アカウント発行（PFシリーズ共通契約 v2.1） |
+| `GET /api/sso?token=…` | ポータルからのSSO。`PF_PROVISION_KEY` で HMAC 検証。ポータルの `role`・`canManage` を保存し、管理者でなければ `/forbidden` へ |
+| `POST /api/provision` | ポータルからの一括アカウント発行（PFシリーズ共通契約 v2.1）。`canManage` も受け取る |
 | 部署マスター取込 | ポータルの公開 `GET /api/departments`・`/api/workplaces` を取り込み、組織ツリーへ upsert |
 | ポータルへの人事情報連携 | ポータルの `POST /api/hr-sync` へ送る（設定画面＋異動発令時に自動） |
 
@@ -149,7 +161,9 @@ npm run build
 | `lib/db.js` | `ALL_APP_KEYS` に `"jinji"` |
 | `lib/appUrls.js` | `APP_BASE_URLS.jinji = "https://jinji.paloma-pf.com"` |
 | `lib/provision.js` | `PROVISION_APP_KEYS` に `"jinji"` |
-| `api/user.js` | `SSO_APP_KEYS` に `"jinji"` |
+| `api/user.js` | `SSO_APP_KEYS` に `"jinji"`／`ADMIN_ONLY_APP_KEYS` で管理者以外の起動を拒否／トークンに `canManage` |
+| `lib/provision.js` | プロビジョニングの送信内容に `canManage` |
+| `lib/userProfile.js` | セッション応答に `role`（タイルの出し分け用） |
 | `index.html` / `admin.html` | `APPS` にタイル定義、`SSO_APPS` に追加 |
 | `icons/jinji.png` | タイル用アイコン。本リポジトリの `public/icon-192.png` をそのままコピーする |
 | `api/hr-sync.js` | **人事情報の受け口（新規）**。仕様と参照実装は [docs/portal-hr-sync.md](docs/portal-hr-sync.md) |
@@ -222,8 +236,10 @@ npm run typecheck && npm run lint && npm run build
 
 確認済みの主な観点:
 
-- 名簿に無い社員番号は、ログインできても全ページ・CSV出力APIから締め出される
-- 名簿から外すと、既存セッションでも次の操作から即座に効く
+- ポータルの一般社員は、ログインできても全ページ・CSV出力APIから締め出される
+- ポータルで管理者を外すと、既存セッションでも次の操作から即座に効く
+- ポータル管理者でも、名簿で許可しなければ給与・考課は開けない
+- ポータル側でもタイルを出さず、起動URLを直接叩いても管理者以外は 403 になる
 - `can_payroll` / `can_evaluation` が無ければ給与・考課は開けず、拒否画面に金額も漏れない
 - ポータル同期は名称だけ取り込み、人事側で組んだ階層を壊さない
 - 異動の発令は人事マスター更新と状態更新が同一トランザクションで、二重発令もできない
