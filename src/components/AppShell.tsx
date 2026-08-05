@@ -52,12 +52,20 @@ export default function AppShell({
       items: [
         { href: "/transfers", label: "異動申請書", icon: FileText },
         { href: "/reemployments", label: "継続雇用申請書", icon: FileClock },
-        ...(canEvaluation ? [{ href: "/evaluations", label: "人事考課", icon: ClipboardCheck }] : []),
-        ...(canPayroll ? [{ href: "/salaries", label: "基本給与", icon: Wallet }] : []),
       ],
     },
-    ...(isOwner
-      ? [{ title: "管理", items: [{ href: "/settings", label: "設定", icon: Settings }] }]
+    // 給与・考課は設定と並ぶ「管理」。ポータル管理者にだけ出す
+    ...(canEvaluation || canPayroll || isOwner
+      ? [
+          {
+            title: "管理",
+            items: [
+              ...(canEvaluation ? [{ href: "/evaluations", label: "人事考課", icon: ClipboardCheck }] : []),
+              ...(canPayroll ? [{ href: "/salaries", label: "基本給与", icon: Wallet }] : []),
+              ...(isOwner ? [{ href: "/settings", label: "設定", icon: Settings }] : []),
+            ],
+          },
+        ]
       : []),
   ];
 

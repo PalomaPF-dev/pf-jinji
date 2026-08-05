@@ -8,17 +8,18 @@
 // ===== 利用許可名簿 =====
 
 /**
- * pf-jinji の利用許可。ポータルの role / can_manage とは独立した、このアプリ固有の名簿。
- * 名簿に載っていない社員番号は SSO でログインできてもアプリを使えない（/forbidden）。
+ * 人事の責任者名簿。ポータルの権限が同期されない状態（障害・開発環境）でも
+ * アプリを管理できる人を確保するための、ポータルに依存しない逃げ道。
+ * 通常のアクセス可否はポータルの role / can_manage で決まる（session.ts 参照）。
  */
 export interface JinjiAdmin {
   loginId: string;
   name: string;
-  /** 名簿そのものを編集できる（人事の責任者）。給与・考課も常に閲覧可 */
+  /** 責任者。ポータルの権限に関わらず入室でき、全機能（給与・考課・設定）を扱える */
   isOwner: boolean;
-  /** 基本給与の閲覧・編集 */
+  /** 廃止（ポータル管理者に統合）。列は残っているが判定には使わない */
   canPayroll: boolean;
-  /** 人事考課の閲覧・編集 */
+  /** 廃止（ポータル管理者に統合）。列は残っているが判定には使わない */
   canEvaluation: boolean;
   note: string | null;
   createdBy: string | null;
@@ -29,8 +30,9 @@ export interface JinjiAdmin {
 export interface JinjiGrant {
   loginId: string;
   name: string;
-  /** ポータルの管理者（role=admin）または設定担当者（can_manage）。入室の条件 */
+  /** ポータル管理者（role=admin）。給与・考課・設定まで扱える */
   isPortalAdmin: boolean;
+  /** 管理（設定）を扱える。ポータル管理者、または責任者名簿（逃げ道） */
   isOwner: boolean;
   canPayroll: boolean;
   canEvaluation: boolean;

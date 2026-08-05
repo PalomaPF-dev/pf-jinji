@@ -43,10 +43,11 @@ export default async function SettingsPage({
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-[#f0e2c8] bg-[#fdfaf3] p-4 text-xs text-[#a06a12]">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
-              アプリに<strong>入れるかどうか</strong>は、ポータルの管理者権限（管理者／ポータル管理権限）で決まります。
-              この名簿は、そのうえで<strong>どこまで見られるか</strong>を決めるものです。
-              名簿に無いポータル管理者も、人事マスター・組織図・申請書・資格までは扱えます。
-              給与と人事考課は、ここで個別に許可した人だけが開けます。
+              アクセス可否は<strong>ポータルの権限</strong>で決まります。
+              ポータル管理者は全機能（給与・考課・設定を含む）、ポータルの管理者権限を持つ方は
+              その他の機能（社員台帳・組織図・申請書・資格）を扱えます。
+              この名簿は、ポータルの権限が届かない状態でもアプリを管理できる
+              <strong>責任者の控え</strong>としてだけ使います。
             </p>
           </div>
 
@@ -57,8 +58,6 @@ export default async function SettingsPage({
                   <th className="px-4 py-3 font-medium">社員番号</th>
                   <th className="px-4 py-3 font-medium">お名前</th>
                   <th className="px-4 py-3 font-medium">責任者</th>
-                  <th className="px-4 py-3 font-medium">給与</th>
-                  <th className="px-4 py-3 font-medium">考課</th>
                   <th className="px-4 py-3 font-medium">メモ</th>
                   <th className="px-4 py-3 font-medium"> </th>
                 </tr>
@@ -76,8 +75,6 @@ export default async function SettingsPage({
                       </Link>
                     </td>
                     <td className="px-4 py-3">{a.isOwner ? "○" : "—"}</td>
-                    <td className="px-4 py-3">{a.canPayroll ? "○" : "—"}</td>
-                    <td className="px-4 py-3">{a.canEvaluation ? "○" : "—"}</td>
                     <td className="px-4 py-3 text-xs text-[#909090]">{a.note ?? "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-2">

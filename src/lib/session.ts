@@ -9,22 +9,23 @@ import type { JinjiGrant } from "./types";
  * アクセス制御は二段構え。
  *
  *   ゲート1（ログイン）  … next-auth。社員番号＋パスワード、またはポータルからのSSO。
- *   ゲート2（利用許可）  … **ポータルの管理者権限**。ポータルで管理者（role=admin）か
- *                          設定担当者（can_manage）である人だけがアプリを使える。
- *                          満たさない社員番号は、ログインできても /forbidden へ。
+ *   ゲート2（利用許可）  … **ポータルの権限**で決まる。満たさない社員番号は
+ *                          ログインできても /forbidden へ。
+ *
+ * ポータルの権限と機能の対応:
+ *   - ポータル管理者（users.role = 'admin'）
+ *       … 全機能。基本給与・人事考課・設定（管理グループ）はこの人だけ。
+ *   - ポータルの管理者権限（users.can_manage）
+ *       … その他の機能（社員台帳・組織図・異動申請・継続雇用・資格）。
  *
  * ポータルの権限は SSO とプロビジョニングの両方で届き、users テーブルに保存する。
  * 判定は JWT に載せず **毎回 DB から引く**。ポータルで管理者を外した瞬間に、手元に
  * 残っているセッションでも即座に効かせるため（ポータルの requireManageSession と同じ思想）。
  *
- * jinji_admins 名簿は「入室できるか」ではなく **どこまで見られるか** を決める役に変えた。
- *   - is_owner       … 名簿・各種マスターを編集できる（人事の責任者）
- *   - can_payroll    … 基本給与
- *   - can_evaluation … 人事考課
- * 名簿に無いポータル管理者は、人事マスター・組織図・申請書・資格までを扱える。
- *
- * ただし **is_owner は入室も許す**。責任者を締め出すと名簿そのものを直せなくなり、
- * アプリが誰にも管理できない状態に陥るため、ここだけは逃げ道を残してある。
+ * jinji_admins 名簿は**責任者（is_owner）の逃げ道**としてだけ残す。ポータルの権限が
+ * 同期されない状態（ポータル障害・開発環境）でも、名簿の責任者は入室でき全機能を使える。
+ * これが無いと、ポータル側の設定ひとつで誰もアプリを管理できない状態に陥る。
+ * （名簿の can_payroll / can_evaluation はこの整理で廃止。列は残るが判定には使わない）
  */
 
 export interface JinjiSession {
@@ -66,9 +67,9 @@ async function baseSession() {
  * 入室可否と権限を1回のDBアクセスで決める。使えないなら null。
  *
  * 入室できるのは次のいずれか。
- *   - ポータルの管理者（users.role = 'admin'）
- *   - ポータルの設定担当者（users.can_manage）
- *   - 人事の責任者（jinji_admins.is_owner）… 名簿を直せる人を締め出さないための逃げ道
+ *   - ポータル管理者（users.role = 'admin'）… 全機能
+ *   - ポータルの管理者権限（users.can_manage）… 給与・考課・設定を除く機能
+ *   - 人事の責任者（jinji_admins.is_owner）… ポータルに依存しない逃げ道。全機能
  */
 export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   if (!loginId) return null;
@@ -76,8 +77,7 @@ export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   const sql = getSql();
   const rows = await sql`
     SELECT u.role, u.can_manage,
-           a.login_id AS admin_login_id, a.name AS admin_name,
-           a.is_owner, a.can_payroll, a.can_evaluation
+           a.login_id AS admin_login_id, a.name AS admin_name, a.is_owner
     FROM users u
     LEFT JOIN jinji_admins a ON a.login_id = u.login_id
     WHERE u.login_id = ${loginId}
@@ -85,18 +85,20 @@ export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   const r = rows[0];
   if (!r) return null;
 
-  const isPortalAdmin = r.role === "admin" || Boolean(r.can_manage);
-  const isOwner = Boolean(r.is_owner);
-  if (!isPortalAdmin && !isOwner) return null;
+  const isPortalAdmin = r.role === "admin";
+  const isManager = Boolean(r.can_manage);
+  const isOwnerRoster = Boolean(r.is_owner);
+  if (!isPortalAdmin && !isManager && !isOwnerRoster) return null;
 
+  // 給与・考課・設定は「管理」扱い。ポータル管理者（と名簿の責任者）だけに開く。
+  const full = isPortalAdmin || isOwnerRoster;
   return {
     loginId,
     name: (r.admin_name as string | null) ?? loginId,
     isPortalAdmin,
-    isOwner,
-    // 給与・考課はポータル管理者でも自動では付かない。人事側で個別に許可する。
-    canPayroll: isOwner || Boolean(r.can_payroll),
-    canEvaluation: isOwner || Boolean(r.can_evaluation),
+    isOwner: full,
+    canPayroll: full,
+    canEvaluation: full,
   };
 }
 
@@ -155,19 +157,19 @@ export async function assertJinjiSession(): Promise<JinjiSession> {
 
 export async function assertPayrollSession(): Promise<JinjiSession> {
   const s = await assertJinjiSession();
-  if (!s.grant.canPayroll) throw new Error("基本給与を操作する権限がありません。");
+  if (!s.grant.canPayroll) throw new Error("基本給与はポータル管理者のみが操作できます。");
   return s;
 }
 
 export async function assertEvaluationSession(): Promise<JinjiSession> {
   const s = await assertJinjiSession();
-  if (!s.grant.canEvaluation) throw new Error("人事考課を操作する権限がありません。");
+  if (!s.grant.canEvaluation) throw new Error("人事考課はポータル管理者のみが操作できます。");
   return s;
 }
 
 export async function assertOwnerSession(): Promise<JinjiSession> {
   const s = await assertJinjiSession();
-  if (!s.grant.isOwner) throw new Error("この操作は人事の責任者（owner）のみが行えます。");
+  if (!s.grant.isOwner) throw new Error("この操作はポータル管理者のみが行えます。");
   return s;
 }
 

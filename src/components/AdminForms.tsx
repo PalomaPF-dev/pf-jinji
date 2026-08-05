@@ -33,8 +33,8 @@ function Notice({ state }: { state: SettingsActionState }) {
 }
 
 /**
- * 利用許可名簿の追加・更新。
- * 既にいる社員番号を入れると権限の更新になる。
+ * 責任者名簿の追加・更新。
+ * 既にいる社員番号を入れると更新になる。
  */
 export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
   const [state, action] = useActionState(upsertAdminAction, {} as SettingsActionState);
@@ -43,11 +43,12 @@ export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
   return (
     <form action={action} className="rounded-xl border border-[#e5e5e5] bg-white p-5">
       <h2 className="mb-1 text-sm font-bold text-[#333333]">
-        {editing ? `「${editing.name}」の権限を変更` : "利用者を追加"}
+        {editing ? `「${editing.name}」を変更` : "責任者を追加"}
       </h2>
       <p className="mb-4 text-xs text-[#707070]">
-        ここに載っている社員番号だけが、このアプリを使えます。
-        既にいる社員番号を入れると権限の更新になります。
+        通常のアクセス可否はポータルの権限で決まります。この名簿は、ポータルの権限が
+        届かない状態でもアプリを管理できる<strong>責任者の控え</strong>です。
+        既にいる社員番号を入れると更新になります。
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -80,52 +81,26 @@ export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
 
       <fieldset className="mt-4">
         <legend className="mb-2 text-sm font-medium text-[#555555]">権限</legend>
-        <div className="space-y-2 text-sm text-[#555555]">
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              name="isOwner"
-              className="mt-1"
-              defaultChecked={v ? v.isOwner === "on" : (editing?.isOwner ?? false)}
-            />
-            <span>
-              責任者（owner）
-              <span className="block text-xs text-[#909090]">
-                この名簿と各種マスターを編集できます。給与・考課も常に閲覧できます。
-              </span>
+        <label className="flex items-start gap-2 text-sm text-[#555555]">
+          <input
+            type="checkbox"
+            name="isOwner"
+            className="mt-1"
+            defaultChecked={v ? v.isOwner === "on" : (editing?.isOwner ?? false)}
+          />
+          <span>
+            責任者（owner）
+            <span className="block text-xs text-[#909090]">
+              ポータルの権限に関わらず入室でき、給与・考課・設定を含む全機能を扱えます。
             </span>
-          </label>
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              name="canPayroll"
-              className="mt-1"
-              defaultChecked={v ? v.canPayroll === "on" : (editing?.canPayroll ?? false)}
-            />
-            <span>
-              基本給与
-              <span className="block text-xs text-[#909090]">給与の閲覧・改定登録ができます。</span>
-            </span>
-          </label>
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              name="canEvaluation"
-              className="mt-1"
-              defaultChecked={v ? v.canEvaluation === "on" : (editing?.canEvaluation ?? false)}
-            />
-            <span>
-              人事考課
-              <span className="block text-xs text-[#909090]">考課の閲覧・入力・確定ができます。</span>
-            </span>
-          </label>
-        </div>
+          </span>
+        </label>
       </fieldset>
 
       <Notice state={state} />
 
       <div className="mt-4">
-        <SubmitButton>{editing ? "権限を保存" : "名簿に追加"}</SubmitButton>
+        <SubmitButton>{editing ? "保存" : "名簿に追加"}</SubmitButton>
       </div>
     </form>
   );
