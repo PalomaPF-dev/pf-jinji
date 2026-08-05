@@ -152,6 +152,33 @@ export async function deleteOrgUnitAction(_prev: OrgActionState, form: FormData)
  * ポータル部署マスターの同期。
  * 組織の増減はアプリ全体に影響するため、責任者（owner）のみ実行できる。
  */
+/**
+ * 名称の規則から中間層（工場・部）を組む。
+ * 名簿取込のたびにも自動で走るが、規則を変えた後などに手で叩き直せるようにしておく。
+ */
+export async function restructureOrgAction(_prev: OrgActionState): Promise<OrgActionState> {
+  const s = await assertOwnerSession();
+  try {
+    const { restructureOrgByName } = await import("@/lib/orgRestructure");
+    const r = await restructureOrgByName();
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_org",
+      targetType: "org_unit",
+      targetLabel: "名称から階層を自動整理",
+      detail: { ...r },
+    });
+    revalidatePath("/org");
+    revalidatePath("/org/edit");
+    return {
+      message: `整理しました（中間層を ${r.middlesCreated} 件作成 / ${r.moved} 件を配下へ移動）`,
+    };
+  } catch (e) {
+    return { error: `整理に失敗しました: ${(e as Error).message}` };
+  }
+}
+
 export async function syncPortalAction(_prev: OrgActionState): Promise<OrgActionState> {
   const s = await assertOwnerSession();
   try {

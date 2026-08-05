@@ -1,5 +1,6 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
+import { restructureOrgByName } from "./orgRestructure";
 import type { Gender } from "./types";
 
 /**
@@ -292,6 +293,14 @@ export async function importRoster(
       });
     }
   }
+  // 名称の規則で中間層（工場・部）を組む。名簿は2階層しか持たないため、
+  // 取込のたびにここで階層を整える（冪等。人が組んだ階層は規則外なら触らない）。
+  try {
+    await restructureOrgByName();
+  } catch (e) {
+    result.errors.push({ row: 0, employeeNo: "-", message: `階層の自動整理に失敗: ${(e as Error).message}` });
+  }
+
   return result;
 }
 
