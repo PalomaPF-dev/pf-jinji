@@ -132,6 +132,27 @@ async function buildSchema(): Promise<void> {
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_employees_org_idx ON jinji_employees(org_unit_id)`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_employees_status_idx ON jinji_employees(status, name_kana)`);
 
+  // 人事システムの名簿（Excel）から取り込む属性。既存DBにも足せるよう ADD COLUMN で継ぎ足す。
+  // コードと名称を対で持つのは、名称は改称され得るがコードは変わらないため
+  // （突合はコード、表示は名称、という使い分けをする）。
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS position_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS duty_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS grade_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS job_category_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS job_category TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS job_group_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS job_group TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS pay_class_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS pay_class TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS employee_class_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS employee_class TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS position_class_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS position_class TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS payroll_org_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS payroll_org_name TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS account_org_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS account_org_name TEXT`);
+
   // ===== 異動申請書 =====
   await safeDdl(() => sql`
     CREATE TABLE IF NOT EXISTS jinji_transfers (
