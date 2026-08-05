@@ -115,12 +115,11 @@ export async function importRoster(
     : records;
   result.skipped = records.length - rows.length;
 
-  // ===== 1. 組織を先に作る（人ごとに引くと202回の往復になるため一括） =====
-  const orgRows = await sql`SELECT id, code, name FROM jinji_org_units`;
+  // ===== 1. 組織 =====
+  // 1件ずつ INSERT すると 202 回の往復になる。unnest で1文にまとめる。
+  const orgRows = await sql`SELECT id, code FROM jinji_org_units`;
   const orgIdByCode = new Map(orgRows.map((r) => [r.code as string, r.id as string]));
-  const orgNameByCode = new Map(orgRows.map((r) => [r.code as string, r.name as string]));
 
-  // 上位組織（組織コード２）
   const parents = new Map<string, string>();
   const children = new Map<string, { name: string; parentCode: string }>();
   for (const r of rows) {
@@ -132,124 +131,167 @@ export async function importRoster(
     if (oc) children.set(oc, { name: on || oc, parentCode: pc });
   }
 
-  const upsertOrg = async (code: string, name: string, kind: string, parentId: string | null) => {
-    const existing = orgIdByCode.get(code);
-    if (existing) {
-      // 名称だけ寄せる。階層・並び順・組織の長は人事側の設定を尊重して触らない
-      if (orgNameByCode.get(code) !== name) {
-        await sql`UPDATE jinji_org_units SET name = ${name} WHERE id = ${existing}`;
-        orgNameByCode.set(code, name);
-      }
-      return existing;
-    }
-    const ins = await sql`
+  /**
+   * 組織をまとめて upsert する。
+   * 既存の組織は**名称だけ**を寄せ、親子関係・並び順・組織の長は触らない
+   * （人事側で組み替えた階層を名簿の取込で壊さないため）。
+   */
+  const upsertOrgs = async (
+    entries: { code: string; name: string; kind: string; parentId: string | null }[],
+  ) => {
+    if (entries.length === 0) return;
+    const inserted = await sql`
       INSERT INTO jinji_org_units (code, name, kind, parent_id)
-      VALUES (${code}, ${name}, ${kind}, ${parentId})
+      SELECT * FROM unnest(
+        ${entries.map((e) => e.code)}::text[],
+        ${entries.map((e) => e.name)}::text[],
+        ${entries.map((e) => e.kind)}::text[],
+        ${entries.map((e) => e.parentId)}::uuid[]
+      )
       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-      RETURNING id`;
-    const id = ins[0].id as string;
-    orgIdByCode.set(code, id);
-    orgNameByCode.set(code, name);
-    result.orgsCreated++;
-    return id;
+      RETURNING id, code, (xmax = 0) AS created`;
+    for (const r of inserted) {
+      orgIdByCode.set(r.code as string, r.id as string);
+      if (r.created) result.orgsCreated++;
+    }
   };
 
-  const parentIdByCode = new Map<string, string>();
-  for (const [code, name] of parents) {
-    parentIdByCode.set(code, await upsertOrg(code, name, "honbu", null));
-  }
-  for (const [code, info] of children) {
-    const parentId = info.parentCode ? parentIdByCode.get(info.parentCode) ?? null : null;
-    await upsertOrg(code, info.name, "ka", parentId);
-  }
+  await upsertOrgs(
+    [...parents].map(([code, name]) => ({ code, name, kind: "honbu", parentId: null })),
+  );
+  await upsertOrgs(
+    [...children].map(([code, info]) => ({
+      code,
+      name: info.name,
+      kind: "ka",
+      parentId: info.parentCode ? orgIdByCode.get(info.parentCode) ?? null : null,
+    })),
+  );
 
-  // ===== 2. 社員を1件ずつ upsert =====
+  // ===== 2. 社員 =====
+  // 1件ずつ UPDATE/INSERT すると人数ぶんの往復になる（1685件で約1700回）。
+  // ローカルDBなら数秒でも、リモートDBでは1往復が数十msかかるため数分になる。
+  // unnest + ON CONFLICT で1文にまとめ、往復を人数に依存させない。
+  type Row = Record<string, string | null>;
+  const valid: Row[] = [];
   for (let i = 0; i < rows.length; i++) {
     const rec = rows[i];
     const rowNo = i + 2; // ヘッダ行が1行目
     const employeeNo = pick(rec, "employeeNo");
+    if (!employeeNo) {
+      result.errors.push({ row: rowNo, employeeNo: "", message: "社員番号がありません。" });
+      continue;
+    }
+    const name = pick(rec, "name");
+    if (!name) {
+      result.errors.push({ row: rowNo, employeeNo, message: "氏名がありません。" });
+      continue;
+    }
+    const orgCode = pick(rec, "orgCode");
+    const genderRaw = pick(rec, "gender");
+    const or = (k: keyof typeof ALIASES) => pick(rec, k) || null;
+    valid.push({
+      employeeNo,
+      name,
+      nameKana: or("nameKana"),
+      gender: genderRaw ? GENDER[genderRaw] ?? null : null,
+      employmentType: or("employmentType"),
+      orgUnitId: orgCode ? orgIdByCode.get(orgCode) ?? null : null,
+      positionName: or("positionName"),
+      positionCode: or("positionCode"),
+      dutyName: or("dutyName"),
+      dutyCode: or("dutyCode"),
+      grade: or("grade"),
+      gradeCode: or("gradeCode"),
+      jobCategory: or("jobCategory"),
+      jobCategoryCode: or("jobCategoryCode"),
+      jobGroup: or("jobGroup"),
+      jobGroupCode: or("jobGroupCode"),
+      payClass: or("payClass"),
+      payClassCode: or("payClassCode"),
+      employeeClass: or("employeeClass"),
+      employeeClassCode: or("employeeClassCode"),
+      positionClass: or("positionClass"),
+      positionClassCode: or("positionClassCode"),
+      payrollOrgCode: or("payrollOrgCode"),
+      payrollOrgName: or("payrollOrgName"),
+      accountOrgCode: or("accountOrgCode"),
+      accountOrgName: or("accountOrgName"),
+    });
+  }
+
+  // 1文に載せる件数の上限。1万件級の名簿でも1文が大きくなりすぎないよう分割する。
+  const CHUNK = 500;
+  for (let start = 0; start < valid.length; start += CHUNK) {
+    const part = valid.slice(start, start + CHUNK);
+    const c = (k: string) => part.map((v) => v[k]);
     try {
-      if (!employeeNo) {
-        result.errors.push({ row: rowNo, employeeNo: "", message: "社員番号がありません。" });
-        continue;
-      }
-      const name = pick(rec, "name");
-      if (!name) {
-        result.errors.push({ row: rowNo, employeeNo, message: "氏名がありません。" });
-        continue;
-      }
-      const orgCode = pick(rec, "orgCode");
-      const orgUnitId = orgCode ? orgIdByCode.get(orgCode) ?? null : null;
-      const genderRaw = pick(rec, "gender");
-      const gender = genderRaw ? GENDER[genderRaw] ?? null : null;
-
-      // 名簿に無い列（生年月日・入社日・連絡先・在籍状態）はこのUPDATEに含めない。
-      // 含めると取込のたびに手入力した情報が消える。
-      const updated = await sql`
-        UPDATE jinji_employees SET
-          name = ${name},
-          name_kana = COALESCE(NULLIF(${pick(rec, "nameKana")}, ''), name_kana),
-          gender = COALESCE(${gender}, gender),
-          employment_type = COALESCE(NULLIF(${pick(rec, "employmentType")}, ''), employment_type),
-          org_unit_id = COALESCE(${orgUnitId}::uuid, org_unit_id),
-          position_name = ${pick(rec, "positionName") || null},
-          position_code = ${pick(rec, "positionCode") || null},
-          duty_name = ${pick(rec, "dutyName") || null},
-          duty_code = ${pick(rec, "dutyCode") || null},
-          grade = ${pick(rec, "grade") || null},
-          grade_code = ${pick(rec, "gradeCode") || null},
-          job_category = ${pick(rec, "jobCategory") || null},
-          job_category_code = ${pick(rec, "jobCategoryCode") || null},
-          job_group = ${pick(rec, "jobGroup") || null},
-          job_group_code = ${pick(rec, "jobGroupCode") || null},
-          pay_class = ${pick(rec, "payClass") || null},
-          pay_class_code = ${pick(rec, "payClassCode") || null},
-          employee_class = ${pick(rec, "employeeClass") || null},
-          employee_class_code = ${pick(rec, "employeeClassCode") || null},
-          position_class = ${pick(rec, "positionClass") || null},
-          position_class_code = ${pick(rec, "positionClassCode") || null},
-          payroll_org_code = ${pick(rec, "payrollOrgCode") || null},
-          payroll_org_name = ${pick(rec, "payrollOrgName") || null},
-          account_org_code = ${pick(rec, "accountOrgCode") || null},
-          account_org_name = ${pick(rec, "accountOrgName") || null},
-          updated_at = NOW()
-        WHERE employee_no = ${employeeNo}
-        RETURNING id`;
-
-      if (updated.length > 0) {
-        result.updated++;
-        continue;
-      }
-
-      await sql`
+      // 名簿に無い列（生年月日・入社日・連絡先・在籍状態）は DO UPDATE の対象にしない。
+      // 対象にすると、取り込むたびに手入力した情報が消える。
+      // status は INSERT のときだけ 'active' が入り、既存行では触られない。
+      const ret = await sql`
         INSERT INTO jinji_employees
           (employee_no, name, name_kana, gender, employment_type, org_unit_id,
            position_name, position_code, duty_name, duty_code, grade, grade_code,
            job_category, job_category_code, job_group, job_group_code,
            pay_class, pay_class_code, employee_class, employee_class_code,
            position_class, position_class_code,
-           payroll_org_code, payroll_org_name, account_org_code, account_org_name,
-           status)
-        VALUES
-          (${employeeNo}, ${name}, ${pick(rec, "nameKana") || null}, ${gender},
-           ${pick(rec, "employmentType") || null}, ${orgUnitId},
-           ${pick(rec, "positionName") || null}, ${pick(rec, "positionCode") || null},
-           ${pick(rec, "dutyName") || null}, ${pick(rec, "dutyCode") || null},
-           ${pick(rec, "grade") || null}, ${pick(rec, "gradeCode") || null},
-           ${pick(rec, "jobCategory") || null}, ${pick(rec, "jobCategoryCode") || null},
-           ${pick(rec, "jobGroup") || null}, ${pick(rec, "jobGroupCode") || null},
-           ${pick(rec, "payClass") || null}, ${pick(rec, "payClassCode") || null},
-           ${pick(rec, "employeeClass") || null}, ${pick(rec, "employeeClassCode") || null},
-           ${pick(rec, "positionClass") || null}, ${pick(rec, "positionClassCode") || null},
-           ${pick(rec, "payrollOrgCode") || null}, ${pick(rec, "payrollOrgName") || null},
-           ${pick(rec, "accountOrgCode") || null}, ${pick(rec, "accountOrgName") || null},
-           'active')`;
-      result.created++;
+           payroll_org_code, payroll_org_name, account_org_code, account_org_name, status)
+        SELECT *, 'active' FROM unnest(
+          ${c("employeeNo")}::text[], ${c("name")}::text[], ${c("nameKana")}::text[],
+          ${c("gender")}::text[], ${c("employmentType")}::text[], ${c("orgUnitId")}::uuid[],
+          ${c("positionName")}::text[], ${c("positionCode")}::text[],
+          ${c("dutyName")}::text[], ${c("dutyCode")}::text[],
+          ${c("grade")}::text[], ${c("gradeCode")}::text[],
+          ${c("jobCategory")}::text[], ${c("jobCategoryCode")}::text[],
+          ${c("jobGroup")}::text[], ${c("jobGroupCode")}::text[],
+          ${c("payClass")}::text[], ${c("payClassCode")}::text[],
+          ${c("employeeClass")}::text[], ${c("employeeClassCode")}::text[],
+          ${c("positionClass")}::text[], ${c("positionClassCode")}::text[],
+          ${c("payrollOrgCode")}::text[], ${c("payrollOrgName")}::text[],
+          ${c("accountOrgCode")}::text[], ${c("accountOrgName")}::text[]
+        )
+        ON CONFLICT (employee_no) DO UPDATE SET
+          name                = EXCLUDED.name,
+          name_kana           = COALESCE(EXCLUDED.name_kana, jinji_employees.name_kana),
+          gender              = COALESCE(EXCLUDED.gender, jinji_employees.gender),
+          employment_type     = COALESCE(EXCLUDED.employment_type, jinji_employees.employment_type),
+          org_unit_id         = COALESCE(EXCLUDED.org_unit_id, jinji_employees.org_unit_id),
+          position_name       = EXCLUDED.position_name,
+          position_code       = EXCLUDED.position_code,
+          duty_name           = EXCLUDED.duty_name,
+          duty_code           = EXCLUDED.duty_code,
+          grade               = EXCLUDED.grade,
+          grade_code          = EXCLUDED.grade_code,
+          job_category        = EXCLUDED.job_category,
+          job_category_code   = EXCLUDED.job_category_code,
+          job_group           = EXCLUDED.job_group,
+          job_group_code      = EXCLUDED.job_group_code,
+          pay_class           = EXCLUDED.pay_class,
+          pay_class_code      = EXCLUDED.pay_class_code,
+          employee_class      = EXCLUDED.employee_class,
+          employee_class_code = EXCLUDED.employee_class_code,
+          position_class      = EXCLUDED.position_class,
+          position_class_code = EXCLUDED.position_class_code,
+          payroll_org_code    = EXCLUDED.payroll_org_code,
+          payroll_org_name    = EXCLUDED.payroll_org_name,
+          account_org_code    = EXCLUDED.account_org_code,
+          account_org_name    = EXCLUDED.account_org_name,
+          updated_at          = NOW()
+        RETURNING (xmax = 0) AS created`;
+      for (const r of ret) {
+        if (r.created) result.created++;
+        else result.updated++;
+      }
     } catch (e) {
-      result.errors.push({ row: rowNo, employeeNo, message: (e as Error).message });
+      // 1文で流すため、失敗すると塊ごと落ちる。どこで落ちたか分かるよう行範囲を出す。
+      result.errors.push({
+        row: start + 2,
+        employeeNo: `${part[0]?.employeeNo ?? ""}〜${part[part.length - 1]?.employeeNo ?? ""}`,
+        message: `${part.length} 件の取込に失敗しました: ${(e as Error).message}`,
+      });
     }
   }
-
   return result;
 }
 
