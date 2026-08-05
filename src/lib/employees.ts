@@ -85,7 +85,8 @@ export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employ
            OR e.employee_no ILIKE ${like}
            OR e.name ILIKE ${like}
            OR COALESCE(e.name_kana, '') ILIKE ${like}
-           OR COALESCE(e.position_name, '') ILIKE ${like})
+           OR COALESCE(e.position_name, '') ILIKE ${like}
+           OR COALESCE(e.duty_name, '') ILIKE ${like})
     ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
   return rows.map(mapEmployee);
 }
