@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings2 } from "lucide-react";
+import { LayoutGrid, Settings2 } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { loadOrgChart } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
@@ -8,6 +8,8 @@ import PageHeader from "@/components/PageHeader";
 import PrintButton from "@/components/PrintButton";
 import EmptyState from "@/components/EmptyState";
 import OrgChart from "@/components/OrgChart";
+import OrgChartBoard from "@/components/OrgChartBoard";
+import { buildOrgChart } from "@/lib/orgChart";
 
 export const dynamic = "force-dynamic";
 
@@ -18,23 +20,35 @@ export const dynamic = "force-dynamic";
 export default async function OrgPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string }>;
+  searchParams: Promise<{ asOf?: string; view?: string }>;
 }) {
   await requireJinjiSession();
-  const { asOf } = await searchParams;
+  const { asOf, view } = await searchParams;
   const today = todayJST();
   const baseDate = asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : today;
 
-  const nodes = await loadOrgChart(baseDate);
+  // 既定は実物の様式に合わせた配置表。ツリーは view=tree で見られる。
+  const asBoard = view !== "tree";
+  const [nodes, board] = await Promise.all([
+    loadOrgChart(baseDate),
+    asBoard ? buildOrgChart(baseDate) : Promise.resolve(null),
+  ]);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
+    <div className={`mx-auto px-4 py-8 ${asBoard ? "max-w-[1600px]" : "max-w-6xl"}`}>
       <PageHeader
         title="組織図"
         description={`${formatDate(baseDate)} 時点`}
         actions={
           <>
             <PrintButton label="組織図を印刷" />
+            <Link
+              href="/org/plan"
+              className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              異動案
+            </Link>
             <Link
               href="/org/edit"
               className="no-print inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
@@ -59,11 +73,25 @@ export default async function OrgPage({
             className="rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#2563eb]"
           />
         </div>
+        <div>
+          <label htmlFor="view" className="mb-1 block text-xs font-medium text-[#707070]">
+            表示
+          </label>
+          <select
+            id="view"
+            name="view"
+            defaultValue={asBoard ? "board" : "tree"}
+            className="rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm outline-none focus:border-[#2563eb]"
+          >
+            <option value="board">配置表（部署・氏名・役職・職務）</option>
+            <option value="tree">ツリー</option>
+          </select>
+        </div>
         <button
           type="submit"
           className="rounded-lg bg-[#2563eb] px-4 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
         >
-          この日付で表示
+          この条件で表示
         </button>
       </form>
 
@@ -80,14 +108,26 @@ export default async function OrgPage({
             </Link>
           }
         />
+      ) : asBoard && board ? (
+        <section className="rounded-xl border border-[#e5e5e5] bg-white p-4">
+          <OrgChartBoard
+            columns={board.columns}
+            unassigned={board.unassigned}
+            planId={null}
+            editable={false}
+          />
+          <p className="no-print mt-3 text-xs text-[#909090]">
+            配置を組み替えるには「異動案」を作ってください。組織図の上で人を動かせます。
+          </p>
+        </section>
       ) : (
         <div className="overflow-x-auto">
           <OrgChart nodes={nodes} />
         </div>
       )}
 
-      {/* 組織図はA4横1枚に収めることが多い */}
-      <style>{`@media print { @page { size: A4 landscape; margin: 10mm; } }`}</style>
+      {/* 配置表は列が多いのでA3横、ツリーはA4横に収まることが多い */}
+      <style>{`@media print { @page { size: ${asBoard ? "A3" : "A4"} landscape; margin: 8mm; } }`}</style>
     </div>
   );
 }
