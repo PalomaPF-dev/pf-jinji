@@ -45,6 +45,8 @@ export interface ChartNode {
   children: ChartNode[];
   /** 表で占める行数（子の行数の合計。葉は1） */
   span: number;
+  /** 並び替えに使うコード（部署コード → 職場コード → 数字の組織コード の順で採る） */
+  sortCode: string | null;
   /** 階層の絞り込みで畳んだ配下（この枠より深い組織数・人数の合計） */
   hidden?: { units: number; people: number };
 }
@@ -128,6 +130,8 @@ export async function buildOrgChart(
       people: [],
       children: [],
       span: 1,
+      // 自分自身のコード: 職場は職場コード（8桁）、部署は部署コード、本部は組織コード
+      sortCode: n.workplaceCode ?? n.deptCode ?? (/^\d+$/.test(n.code) ? n.code : null),
     };
     hostByUnitId.set(n.id, node);
     node.children = n.children.map(toChart);
@@ -159,6 +163,61 @@ export async function buildOrgChart(
     for (const c of node.children) mergeInto(c);
   };
   for (const r of roots) mergeInto(r);
+
+  // 同名の兄弟枠は1つに畳む（部署グループ「生産管理部」と部の8桁組織「生産管理部」など）。
+  // 子を持つ方を残し、畳んだ方の人はその枠に出す。
+  const foldSiblings = (node: ChartNode) => {
+    const byKey = new Map<string, ChartNode>();
+    const kept: ChartNode[] = [];
+    for (const c of node.children) {
+      const key = normalizeOrgName(c.orgUnitName);
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, c);
+        kept.push(c);
+        continue;
+      }
+      let host = prev;
+      let absorbed = c;
+      if (prev.children.length === 0 && c.children.length > 0) {
+        host = c;
+        absorbed = prev;
+        kept[kept.indexOf(prev)] = c;
+        byKey.set(key, c);
+      }
+      // 畳んだ枠（とそこへ統合済みの組織）の人は残す枠に出す
+      hostByUnitId.set(absorbed.orgUnitId, host);
+      for (const [uid, h] of hostByUnitId) {
+        if (h === absorbed) hostByUnitId.set(uid, host);
+      }
+      unitRank.set(absorbed.orgUnitId, unitRank.get(host.orgUnitId) ?? 0);
+      host.children.push(...absorbed.children);
+      if (!host.sortCode) host.sortCode = absorbed.sortCode;
+    }
+    node.children = kept;
+    node.children.forEach(foldSiblings);
+  };
+  for (const r of roots) foldSiblings(r);
+
+  // 並びは 部署コード → 職場コード の順（コードが無い組織は名前順で末尾側）
+  const compareCode = (a: ChartNode, b: ChartNode): number => {
+    if (a.sortCode && b.sortCode) {
+      const na = Number(a.sortCode);
+      const nb = Number(b.sortCode);
+      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      if (a.sortCode !== b.sortCode) return a.sortCode < b.sortCode ? -1 : 1;
+      return 0;
+    }
+    if (a.sortCode) return -1;
+    if (b.sortCode) return 1;
+    return a.orgUnitName.localeCompare(b.orgUnitName, "ja");
+  };
+  const sortTree = (n: ChartNode) => {
+    n.children.sort(compareCode);
+    n.children.forEach(sortTree);
+  };
+  roots.sort(compareCode);
+  roots.forEach(sortTree);
 
   // 深さと行数を計算する
   let maxDepth = 0;
