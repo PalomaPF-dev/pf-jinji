@@ -235,6 +235,48 @@ async function buildSchema(): Promise<void> {
     )`);
   await safeDdl(() => sql`ALTER TABLE jinji_counters ADD COLUMN IF NOT EXISTS reemp_seq INTEGER NOT NULL DEFAULT 0`);
 
+  // ===== 異動案（組織図の上で編成する下書き）=====
+  // 組織図でドラッグして人を動かした結果は、その場で人事マスターへ書かない。
+  // 所属の変更は異動申請書（J-426）を通すのが正で、直接書き換えると履歴も帳票も残らないため。
+  // ここには「案」として溜め、確定したときに対象者ぶんの申請書を起こす。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_org_plans (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name         TEXT NOT NULL,
+      -- 組織図をどの時点で見るか（過去日付の組織図の上でも編成できる）
+      base_date    DATE,
+      -- 発令予定日。申請書を起こすときの適用日になる
+      effective_date DATE,
+      status       TEXT NOT NULL DEFAULT 'draft',
+      note         TEXT,
+      created_by   TEXT,
+      created_name TEXT,
+      applied_at   TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+
+  // 案の中の1件＝1人の動き。from_* は案を作った時点の値を焼き付ける
+  // （途中で人事マスターが変わっても、案の「現」がぶれないように）。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_org_plan_moves (
+      id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      plan_id           UUID NOT NULL REFERENCES jinji_org_plans(id) ON DELETE CASCADE,
+      employee_id       UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      from_org_unit_id  UUID,
+      to_org_unit_id    UUID,
+      from_position     TEXT,
+      to_position       TEXT,
+      from_duty         TEXT,
+      to_duty           TEXT,
+      -- 帳票の凡例に合わせた印: 'promo_both'=◎昇格(職務・役職) / 'promo_duty'=○昇格(職務) / 'move'=△所属移動
+      mark              TEXT,
+      transfer_id       UUID,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (plan_id, employee_id)
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_org_plan_moves_plan_idx ON jinji_org_plan_moves(plan_id)`);
+
   // ===== 継続雇用申請書（指定帳票 J-456）=====
   // 高齢者雇用・アルバイト契約の満了に伴い、期間を限って雇用を継続することを申請する。
   // 異動申請と違い人事マスターへの発令は伴わないため、承認までで完結する。
