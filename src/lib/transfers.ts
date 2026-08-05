@@ -12,6 +12,7 @@ import {
   type TransferApproval,
   type TransferApprovalSlot,
   type TransferFormKind,
+  type TransferItem,
   type TransferKind,
   type TransferStatus,
 } from "./types";
@@ -73,6 +74,9 @@ function mapTransfer(r: any): Transfer {
     successorChecked: Boolean(r.successor_checked),
     systemDeptCode: r.system_dept_code ?? null,
     systemDeptName: r.system_dept_name ?? null,
+
+    isBulk: Boolean(r.is_bulk),
+    itemCount: Number(r.item_count ?? 0),
   };
 }
 
@@ -116,6 +120,8 @@ export interface TransferFilter {
   employeeId?: string | null;
   status?: TransferStatus | "all";
   q?: string;
+  /** 表示範囲（管理者の工場スコープ）。null は全体 */
+  scopeOrgIds?: string[] | null;
 }
 
 export async function listTransfers(filter: TransferFilter = {}): Promise<Transfer[]> {
@@ -125,20 +131,30 @@ export async function listTransfers(filter: TransferFilter = {}): Promise<Transf
   const status = filter.status && filter.status !== "all" ? filter.status : null;
   const q = (filter.q ?? "").trim();
   const like = q ? `%${q}%` : null;
+  const scope = filter.scopeOrgIds ?? null;
 
+  // 一括申請は「代表者または別紙の誰か」が範囲内なら見せる
   const rows = await sql`
     SELECT t.*, e.employee_no, e.name AS employee_name,
-           fo.name AS from_org_name, too.name AS to_org_name
+           fo.name AS from_org_name, too.name AS to_org_name,
+           (SELECT count(*)::int FROM jinji_transfer_items i WHERE i.transfer_id = t.id) AS item_count
     FROM jinji_transfers t
     JOIN jinji_employees e ON e.id = t.employee_id
     LEFT JOIN jinji_org_units fo ON fo.id = t.from_org_unit_id
     LEFT JOIN jinji_org_units too ON too.id = t.to_org_unit_id
-    WHERE (${employeeId}::uuid IS NULL OR t.employee_id = ${employeeId})
+    WHERE (${employeeId}::uuid IS NULL OR t.employee_id = ${employeeId}
+           OR EXISTS (SELECT 1 FROM jinji_transfer_items i
+                      WHERE i.transfer_id = t.id AND i.employee_id = ${employeeId}))
       AND (${status}::text IS NULL OR t.status = ${status})
       AND (${like}::text IS NULL
            OR t.transfer_no ILIKE ${like}
            OR e.name ILIKE ${like}
            OR e.employee_no ILIKE ${like})
+      AND (${scope}::uuid[] IS NULL
+           OR e.org_unit_id = ANY(${scope}::uuid[])
+           OR EXISTS (SELECT 1 FROM jinji_transfer_items i
+                      JOIN jinji_employees ie ON ie.id = i.employee_id
+                      WHERE i.transfer_id = t.id AND ie.org_unit_id = ANY(${scope}::uuid[])))
     ORDER BY t.created_at DESC`;
   return rows.map(mapTransfer);
 }
@@ -148,13 +164,46 @@ export async function getTransfer(id: string): Promise<Transfer | null> {
   const sql = getSql();
   const rows = await sql`
     SELECT t.*, e.employee_no, e.name AS employee_name,
-           fo.name AS from_org_name, too.name AS to_org_name
+           fo.name AS from_org_name, too.name AS to_org_name,
+           (SELECT count(*)::int FROM jinji_transfer_items i WHERE i.transfer_id = t.id) AS item_count
     FROM jinji_transfers t
     JOIN jinji_employees e ON e.id = t.employee_id
     LEFT JOIN jinji_org_units fo ON fo.id = t.from_org_unit_id
     LEFT JOIN jinji_org_units too ON too.id = t.to_org_unit_id
     WHERE t.id = ${id} LIMIT 1`;
   return rows[0] ? mapTransfer(rows[0]) : null;
+}
+
+/** 一括申請の別紙（対象者一覧）。並びは登録順。 */
+export async function listTransferItems(transferId: string): Promise<TransferItem[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT i.*, e.employee_no, e.name AS employee_name,
+           fo.code AS from_code, fo.name AS from_name,
+           too.code AS to_code, too.name AS to_name
+    FROM jinji_transfer_items i
+    JOIN jinji_employees e ON e.id = i.employee_id
+    LEFT JOIN jinji_org_units fo ON fo.id = i.from_org_unit_id
+    LEFT JOIN jinji_org_units too ON too.id = i.to_org_unit_id
+    WHERE i.transfer_id = ${transferId}
+    ORDER BY i.sort ASC`;
+  return rows.map((r: any) => ({
+    id: r.id,
+    transferId: r.transfer_id,
+    employeeId: r.employee_id,
+    employeeNo: r.employee_no ?? "",
+    employeeName: r.employee_name ?? "",
+    fromOrgUnitId: r.from_org_unit_id ?? null,
+    fromOrgUnitCode: r.from_code ?? null,
+    fromOrgUnitName: r.from_name ?? null,
+    toOrgUnitId: r.to_org_unit_id ?? null,
+    toOrgUnitCode: r.to_code ?? null,
+    toOrgUnitName: r.to_name ?? null,
+    effectiveDate: toISODate(r.effective_date),
+    reason: r.reason ?? null,
+    sort: Number(r.sort ?? 0),
+  }));
 }
 
 export async function listApprovals(transferId: string): Promise<TransferApproval[]> {
@@ -351,12 +400,104 @@ export async function createTransfer(
   return id;
 }
 
+// ===== 一括申請（別紙） =====
+
+export interface BulkTransferItemInput {
+  employeeId: string;
+  toOrgUnitId: string;
+  effectiveDate: string;
+  reason: string | null;
+}
+
+export interface BulkTransferInput {
+  formDate: string | null;
+  /** 共通の異動日（別紙の各行はこれを既定に個別指定できる） */
+  effectiveDate: string;
+  reason: string | null;
+  remarks: string | null;
+  items: BulkTransferItemInput[];
+}
+
+export function validateBulkTransfer(input: BulkTransferInput): string | null {
+  if (!input.effectiveDate) return "異動日を入力してください。";
+  if (input.items.length === 0) return "対象者を1人以上追加してください。";
+  const seen = new Set<string>();
+  for (let i = 0; i < input.items.length; i++) {
+    const item = input.items[i];
+    if (!item.employeeId) return `${i + 1}行目の対象者が不正です。`;
+    if (seen.has(item.employeeId)) return `同じ対象者が複数行にいます（${i + 1}行目）。`;
+    seen.add(item.employeeId);
+    if (!item.toOrgUnitId) return `${i + 1}行目の新所属を選んでください。`;
+    if (!item.effectiveDate) return `${i + 1}行目の異動日を入力してください。`;
+  }
+  return null;
+}
+
+/**
+ * 一括異動申請を作成する。1枚の申請書（帳票には「別紙参照」と載る）に、
+ * 別紙として対象者の一覧をぶら下げる。承認・発令のながれは単独の申請と同じ。
+ * 現所属はこの時点の人事マスターの値を焼き付ける。
+ */
+export async function createBulkTransfer(
+  input: BulkTransferInput,
+  draftedBy: string,
+  draftedName: string,
+): Promise<string> {
+  await ensureSchema();
+  const sql = getSql();
+
+  const empIds = input.items.map((x) => x.employeeId);
+  const emps = await sql`
+    SELECT id, org_unit_id FROM jinji_employees WHERE id = ANY(${empIds}::uuid[])`;
+  const orgByEmp = new Map(emps.map((r: any) => [r.id as string, r.org_unit_id as string | null]));
+  for (const item of input.items) {
+    if (!orgByEmp.has(item.employeeId)) throw new Error("対象者が見つかりません。");
+  }
+
+  const year = Number(input.effectiveDate.slice(0, 4));
+  const transferNo = await nextTransferNo(year);
+
+  const rows = await sql`
+    INSERT INTO jinji_transfers
+      (transfer_no, employee_id, kind, is_bulk, effective_date, reason, remarks,
+       status, drafted_by, drafted_name, form_kind, form_date)
+    VALUES (${transferNo}, ${input.items[0].employeeId}, 'haichi', true,
+            ${input.effectiveDate}, ${input.reason}, ${input.remarks},
+            'draft', ${draftedBy}, ${draftedName}, 'transfer', ${input.formDate})
+    RETURNING id`;
+  const id = rows[0].id as string;
+
+  await sql`
+    INSERT INTO jinji_transfer_items
+      (transfer_id, employee_id, from_org_unit_id, to_org_unit_id, effective_date, reason, sort)
+    SELECT ${id}, * FROM unnest(
+      ${input.items.map((x) => x.employeeId)}::uuid[],
+      ${input.items.map((x) => orgByEmp.get(x.employeeId) ?? null)}::uuid[],
+      ${input.items.map((x) => x.toOrgUnitId)}::uuid[],
+      ${input.items.map((x) => x.effectiveDate)}::date[],
+      ${input.items.map((x) => x.reason)}::text[],
+      ${input.items.map((_, i) => i)}::int[]
+    )`;
+
+  for (let i = 0; i < TRANSFER_APPROVAL_SLOTS.length; i++) {
+    const s = TRANSFER_APPROVAL_SLOTS[i];
+    await sql`
+      INSERT INTO jinji_transfer_approvals (transfer_id, slot, seq)
+      VALUES (${id}, ${s.slot}, ${i})
+      ON CONFLICT (transfer_id, slot) DO NOTHING`;
+  }
+  return id;
+}
+
 /** 起案中・差戻の申請だけ編集できる（承認後に内容が変わると帳票と実態がずれるため）。 */
 export async function updateTransfer(id: string, input: TransferInput): Promise<void> {
   await ensureSchema();
   const sql = getSql();
-  const cur = await sql`SELECT status FROM jinji_transfers WHERE id = ${id} LIMIT 1`;
+  const cur = await sql`SELECT status, is_bulk FROM jinji_transfers WHERE id = ${id} LIMIT 1`;
   if (cur.length === 0) throw new Error("対象が見つかりません。");
+  if (cur[0].is_bulk) {
+    throw new Error("一括申請はこの画面では編集できません。削除して作り直してください。");
+  }
   const status = normalizeTransferStatus(cur[0].status);
   if (status !== "draft" && status !== "rejected") {
     throw new Error("申請中・承認済みの申請書は編集できません。差し戻してから修正してください。");
@@ -501,6 +642,27 @@ export async function applyTransfer(id: string): Promise<void> {
 
   const kind = normalizeTransferKind(t.kind);
   const effectiveDate = toISODate(t.effective_date);
+
+  // 一括申請は別紙の全員を新所属へ移す（1トランザクション）
+  if (t.is_bulk) {
+    const items = await sql`
+      SELECT employee_id, to_org_unit_id FROM jinji_transfer_items
+      WHERE transfer_id = ${id} AND to_org_unit_id IS NOT NULL`;
+    await sql.transaction([
+      sql`
+        UPDATE jinji_employees e
+        SET org_unit_id = v.to_org, updated_at = NOW()
+        FROM unnest(
+          ${items.map((r: any) => r.employee_id as string)}::uuid[],
+          ${items.map((r: any) => r.to_org_unit_id as string)}::uuid[]
+        ) AS v(emp, to_org)
+        WHERE e.id = v.emp`,
+      sql`
+        UPDATE jinji_transfers SET status = 'issued', applied_at = NOW(), updated_at = NOW()
+        WHERE id = ${id}`,
+    ]);
+    return;
+  }
 
   // 退職の異動は在籍状態も落とす。それ以外は在籍状態を触らない。
   const retire = kind === "taishoku";

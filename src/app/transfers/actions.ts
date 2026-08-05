@@ -6,15 +6,20 @@ import { assertJinjiSession } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
 import {
   applyTransfer,
+  createBulkTransfer,
   createTransfer,
   decideApproval,
   deleteTransfer,
   getTransfer,
+  listTransferItems,
   submitTransfer,
   updateTransfer,
+  validateBulkTransfer,
   validateTransfer,
+  type BulkTransferItemInput,
   type TransferInput,
 } from "@/lib/transfers";
+import { getScope, inScope } from "@/lib/scope";
 import {
   ASSIGNMENT_KINDS,
   COMPANY_CAR_AFTER_KINDS,
@@ -157,6 +162,77 @@ export async function createTransferAction(
     targetType: "transfer",
     targetId: id,
     targetLabel: t ? `${t.transferNo} ${t.employeeName}` : id,
+  });
+  revalidatePath("/transfers");
+  redirect(`/transfers/${id}`);
+}
+
+/** 一括異動申請（別紙）の作成。行の実体はJSONで届く。 */
+export async function createBulkTransferAction(
+  _prev: TransferActionState,
+  form: FormData,
+): Promise<TransferActionState> {
+  const s = await assertJinjiSession();
+
+  let items: BulkTransferItemInput[];
+  try {
+    const raw = JSON.parse(str(form, "items") || "[]") as {
+      employeeId?: unknown;
+      toOrgUnitId?: unknown;
+      effectiveDate?: unknown;
+      reason?: unknown;
+    }[];
+    if (!Array.isArray(raw)) throw new Error();
+    items = raw.map((x) => ({
+      employeeId: String(x.employeeId ?? ""),
+      toOrgUnitId: String(x.toOrgUnitId ?? ""),
+      effectiveDate: String(x.effectiveDate ?? ""),
+      reason: String(x.reason ?? "").trim() || null,
+    }));
+  } catch {
+    return { error: "対象者一覧を読み取れませんでした。もう一度お試しください。" };
+  }
+
+  const input = {
+    formDate: nullable(form, "formDate"),
+    effectiveDate: str(form, "effectiveDate"),
+    reason: nullable(form, "reason"),
+    remarks: nullable(form, "remarks"),
+    items,
+  };
+  const problem = validateBulkTransfer(input);
+  if (problem) return { error: problem };
+
+  // 管理者は自分の工場の外の人を申請に載せられない（画面で絞っていても直送信を弾く）
+  const scope = await getScope(s.grant);
+  if (scope.orgUnitIds !== null) {
+    const sqlMod = await import("@/lib/neon");
+    const rows = await sqlMod.getSql()`
+      SELECT id, org_unit_id FROM jinji_employees
+      WHERE id = ANY(${items.map((x) => x.employeeId)}::uuid[])`;
+    for (const r of rows as { id: string; org_unit_id: string | null }[]) {
+      if (!inScope(scope, r.org_unit_id)) {
+        return { error: "表示範囲（自分の工場）の外の社員が含まれています。" };
+      }
+    }
+  }
+
+  let id: string;
+  try {
+    id = await createBulkTransfer(input, s.grant.loginId, s.grant.name);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const t = await getTransfer(id);
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "create_transfer",
+    targetType: "transfer",
+    targetId: id,
+    targetLabel: t ? `${t.transferNo} 一括申請（${items.length}名）` : id,
+    detail: { bulk: true, count: items.length },
   });
   revalidatePath("/transfers");
   redirect(`/transfers/${id}`);
@@ -305,9 +381,15 @@ export async function applyTransferAction(
   // 連携に失敗しても発令そのものは成立しているので、状態は戻さず注意書きだけ添える
   // （設定画面の「ポータルへ連携」から後追いでやり直せる）。
   let portalNote = "";
-  if (before?.employeeNo) {
+  // 一括申請は別紙の全員をポータルへ連携する
+  const pushNos = before?.isBulk
+    ? (await listTransferItems(id)).map((i) => i.employeeNo).filter(Boolean)
+    : before?.employeeNo
+      ? [before.employeeNo]
+      : [];
+  if (pushNos.length > 0) {
     try {
-      const result = await pushToPortal(await buildPortalPayloadFor([before.employeeNo]));
+      const result = await pushToPortal(await buildPortalPayloadFor(pushNos));
       if (result.errors.length > 0) {
         portalNote = `ただしポータルへの連携は失敗しました（${result.errors[0].message}）。設定画面から連携し直してください。`;
       } else {
@@ -318,8 +400,10 @@ export async function applyTransferAction(
         actorName: s.grant.name,
         action: "push_portal",
         targetType: "employee",
-        targetId: before.employeeId,
-        targetLabel: `${before.employeeNo} ${before.employeeName}`,
+        targetId: before?.employeeId,
+        targetLabel: before?.isBulk
+          ? `一括発令 ${pushNos.length}名`
+          : `${before?.employeeNo} ${before?.employeeName}`,
         detail: { trigger: "apply_transfer", errorCount: result.errors.length },
       });
     } catch (e) {

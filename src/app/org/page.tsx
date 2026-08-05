@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { LayoutGrid, Settings2 } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { loadOrgChart } from "@/lib/org";
+import type { OrgNode } from "@/lib/types";
 import { todayJST } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
@@ -22,40 +24,68 @@ export default async function OrgPage({
 }: {
   searchParams: Promise<{ asOf?: string; view?: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
   const { asOf, view } = await searchParams;
   const today = todayJST();
   const baseDate = asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : today;
 
   // 既定は実物の様式に合わせた配置表。ツリーは view=tree で見られる。
   const asBoard = view !== "tree";
-  const [nodes, board] = await Promise.all([
+  let [nodes, board] = await Promise.all([
     loadOrgChart(baseDate),
     asBoard ? buildOrgChart(baseDate) : Promise.resolve(null),
   ]);
 
+  // 管理者は自分の工場だけを描画する
+  if (scope.orgUnitIds !== null) {
+    const set = new Set(scope.orgUnitIds);
+    const findNode = (list: OrgNode[]): OrgNode | null => {
+      for (const n of list) {
+        if (n.id === scope.rootOrgId) return n;
+        const f = findNode(n.children);
+        if (f) return f;
+      }
+      return null;
+    };
+    const rootNode = findNode(nodes);
+    nodes = rootNode ? [rootNode] : [];
+    if (board) {
+      board = {
+        columns: board.columns
+          .map((c) => ({ ...c, groups: c.groups.filter((g) => set.has(g.orgUnitId)) }))
+          .filter((c) => c.groups.length > 0),
+        unassigned: [],
+      };
+    }
+  }
+
   return (
     <div className={`mx-auto px-4 py-8 ${asBoard ? "max-w-[1600px]" : "max-w-6xl"}`}>
       <PageHeader
-        title="組織図"
+        title={scope.scopeName ? `組織図（${scope.scopeName}）` : "組織図"}
         description={`${formatDate(baseDate)} 時点`}
         actions={
           <>
             <PrintButton label="組織図を印刷" />
-            <Link
-              href="/org/plan"
-              className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
-            >
-              <LayoutGrid className="h-4 w-4" />
-              異動案
-            </Link>
-            <Link
-              href="/org/edit"
-              className="no-print inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
-            >
-              <Settings2 className="h-4 w-4" />
-              組織を編集
-            </Link>
+            {scope.orgUnitIds === null && (
+              <>
+                <Link
+                  href="/org/plan"
+                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  異動案
+                </Link>
+                <Link
+                  href="/org/edit"
+                  className="no-print inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  組織を編集
+                </Link>
+              </>
+            )}
           </>
         }
       />

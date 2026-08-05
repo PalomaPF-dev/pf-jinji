@@ -39,6 +39,32 @@ export interface EmployeeChoice {
   positionName: string | null;
   dutyName: string | null;
   grade: string | null;
+  /** 本部直下の祖先（〜工場・〜部）。「工場 → 職場 → 対象者」の絞り込みに使う */
+  factoryId: string | null;
+  factoryName: string | null;
+}
+
+/** 工場 → 職場 → 対象者 の絞り込み选択肢を、対象者一覧から組み立てる。 */
+export function buildTargetPicker(employees: EmployeeChoice[]) {
+  const factories = new Map<string, string>();
+  const workplaces = new Map<string, Map<string, string>>();
+  for (const e of employees) {
+    const fid = e.factoryId ?? "";
+    const fname = e.factoryName ?? "（未配置）";
+    if (!factories.has(fid)) factories.set(fid, fname);
+    const w = workplaces.get(fid) ?? new Map<string, string>();
+    w.set(e.orgUnitId ?? "", e.orgUnitName ?? "（未配置）");
+    workplaces.set(fid, w);
+  }
+  return {
+    factories: [...factories.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+    workplacesOf: (factoryId: string) =>
+      [...(workplaces.get(factoryId) ?? new Map()).entries()]
+        .map(([id, name]) => ({ id: id as string, name: name as string }))
+        .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+  };
 }
 
 /**
@@ -72,6 +98,11 @@ export default function TransferForm({
   const v = state.values;
 
   const [employeeId, setEmployeeId] = useState(transfer?.employeeId ?? "");
+  // 「工場 → 職場 → 対象者」の絞り込み（送信はしない。対象者を探しやすくするだけ）
+  const initial = employees.find((e) => e.id === (transfer?.employeeId ?? ""));
+  const [factoryId, setFactoryId] = useState(initial?.factoryId ?? "");
+  const [workplaceId, setWorkplaceId] = useState(initial?.orgUnitId ?? "");
+  const picker = buildTargetPicker(employees);
   // 帳票の連動（親のチェックで子の欄を出す）に必要なぶんだけ state で持つ
   const [formKind, setFormKind] = useState(transfer?.formKind ?? "transfer");
   const [relocation, setRelocation] = useState(transfer?.relocation ?? "");
@@ -86,7 +117,14 @@ export default function TransferForm({
   const [seenValues, setSeenValues] = useState(v);
   if (v !== seenValues) {
     setSeenValues(v);
-    if (v?.employeeId !== undefined) setEmployeeId(v.employeeId);
+    if (v?.employeeId !== undefined) {
+      setEmployeeId(v.employeeId);
+      const emp = employees.find((e) => e.id === v.employeeId);
+      if (emp) {
+        setFactoryId(emp.factoryId ?? "");
+        setWorkplaceId(emp.orgUnitId ?? "");
+      }
+    }
     if (v?.formKind !== undefined) setFormKind(v.formKind === "org_rename" ? "org_rename" : "transfer");
     if (v?.relocation !== undefined) setRelocation(v.relocation);
     if (v?.mobile !== undefined) setMobile(v.mobile);
@@ -159,7 +197,57 @@ export default function TransferForm({
 
       {/* ===== 【対象社員】 ===== */}
       <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
-        <h2 className="mb-4 text-sm font-bold text-[#333333]">【対象社員】</h2>
+        <h2 className="mb-1 text-sm font-bold text-[#333333]">【対象社員】</h2>
+        <p className="mb-4 text-xs text-[#707070]">
+          自分の工場・職場から順に絞って対象者を選べます（絞らずに選ぶこともできます）。
+        </p>
+        <div className="mb-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="pickFactory" className="mb-1 block text-sm font-medium text-[#555555]">
+              工場（部）
+            </label>
+            <select
+              id="pickFactory"
+              value={factoryId}
+              onChange={(e) => {
+                setFactoryId(e.target.value);
+                setWorkplaceId("");
+                setEmployeeId("");
+              }}
+              className={INPUT}
+            >
+              <option value="">すべて</option>
+              {picker.factories.map((f) => (
+                <option key={f.id || "none"} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="pickWorkplace" className="mb-1 block text-sm font-medium text-[#555555]">
+              職場
+            </label>
+            <select
+              id="pickWorkplace"
+              value={workplaceId}
+              onChange={(e) => {
+                setWorkplaceId(e.target.value);
+                setEmployeeId("");
+              }}
+              className={INPUT}
+              disabled={!factoryId}
+            >
+              <option value="">{factoryId ? "すべて" : "先に工場を選んでください"}</option>
+              {factoryId &&
+                picker.workplacesOf(factoryId).map((w) => (
+                  <option key={w.id || "none"} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="employeeId" className="mb-1 block text-sm font-medium text-[#555555]">
@@ -167,22 +255,26 @@ export default function TransferForm({
             </label>
             {/* 制御コンポーネントにすると React 19 のフォーム自動リセットで選択が消え、
                 required に引っかかって再送信できなくなる。他の select と同じく
-                「key で作り直す非制御 + onChange で表示用 state を同期」にしている。 */}
+                「key で作り直す非制御 + onChange で表示用 state を同期」にしている。
+                絞り込みが変わったら key で作り直し、選択をやり直させる。 */}
             <select
               id="employeeId"
               name="employeeId"
               required
-              key={`emp-${v?.employeeId ?? ""}`}
-              defaultValue={v?.employeeId ?? transfer?.employeeId ?? ""}
+              key={`emp-${v?.employeeId ?? ""}-${factoryId}-${workplaceId}`}
+              defaultValue={employeeId || (v?.employeeId ?? transfer?.employeeId ?? "")}
               onChange={(e) => setEmployeeId(e.target.value)}
               className={INPUT}
             >
               <option value="">選んでください</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}（{e.employeeNo}）
-                </option>
-              ))}
+              {employees
+                .filter((e) => !factoryId || (e.factoryId ?? "") === factoryId)
+                .filter((e) => !workplaceId || (e.orgUnitId ?? "") === workplaceId)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}（{e.employeeNo}）
+                  </option>
+                ))}
             </select>
             <p className="mt-1 text-xs text-[#909090]">
               部署・社員ｺｰﾄﾞ・氏名は選んだ社員から帳票に転記されます。

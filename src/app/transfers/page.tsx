@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { listTransfers } from "@/lib/transfers";
 import { getEmployee } from "@/lib/employees";
 import { formatDate } from "@/lib/format";
@@ -19,7 +20,8 @@ export default async function TransfersPage({
 }: {
   searchParams: Promise<{ employee?: string; status?: string; q?: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
   const { employee = "", status = "all", q = "" } = await searchParams;
 
   const [transfers, target] = await Promise.all([
@@ -27,6 +29,7 @@ export default async function TransfersPage({
       employeeId: employee || null,
       status: (status === "all" ? "all" : status) as TransferStatus | "all",
       q,
+      scopeOrgIds: scope.orgUnitIds,
     }),
     employee ? getEmployee(employee) : Promise.resolve(null),
   ]);
@@ -39,13 +42,22 @@ export default async function TransfersPage({
         backHref={target ? `/employees/${target.id}` : undefined}
         backLabel={target ? "社員カードへ戻る" : undefined}
         actions={
-          <Link
-            href="/transfers/new"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
-          >
-            <Plus className="h-4 w-4" />
-            申請書を作成
-          </Link>
+          <>
+            <Link
+              href="/transfers/bulk"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
+            >
+              <Users className="h-4 w-4" />
+              一括申請（別紙）
+            </Link>
+            <Link
+              href="/transfers/new"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
+            >
+              <Plus className="h-4 w-4" />
+              申請書を作成
+            </Link>
+          </>
         }
       />
 
@@ -124,8 +136,10 @@ export default async function TransfersPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-[#333333]">
-                    {t.employeeName}
-                    <div className="text-xs text-[#909090]">{t.employeeNo}</div>
+                    {t.isBulk ? `${t.employeeName} 外${Math.max(t.itemCount - 1, 0)}名` : t.employeeName}
+                    <div className="text-xs text-[#909090]">
+                      {t.isBulk ? `一括申請（別紙 ${t.itemCount}名）` : t.employeeNo}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-[#555555]">{TRANSFER_KIND_LABEL[t.kind]}</td>
                   <td className="px-4 py-3 text-[#707070]">{t.fromOrgUnitName ?? "—"}</td>

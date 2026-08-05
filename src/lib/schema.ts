@@ -29,7 +29,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -258,6 +258,25 @@ async function buildSchema(): Promise<void> {
   await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS successor_checked BOOLEAN NOT NULL DEFAULT false`);
   await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS system_dept_code TEXT`);
   await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS system_dept_name TEXT`);
+
+  // ===== 一括異動申請（別紙）=====
+  // 異動人数が多いとき、1枚の申請書に「別紙参照」と書き、対象者の一覧を別紙として添える。
+  // is_bulk=true の申請は employee_id を代表者とし、実際の対象は items が持つ。
+  await safeDdl(() => sql`ALTER TABLE jinji_transfers ADD COLUMN IF NOT EXISTS is_bulk BOOLEAN NOT NULL DEFAULT false`);
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_transfer_items (
+      id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      transfer_id      UUID NOT NULL REFERENCES jinji_transfers(id) ON DELETE CASCADE,
+      employee_id      UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      -- 申請時点の所属を焼き付ける（別紙の「現所属」がぶれないように）
+      from_org_unit_id UUID,
+      to_org_unit_id   UUID,
+      effective_date   DATE,
+      reason           TEXT,
+      sort             INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (transfer_id, employee_id)
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_transfer_items_transfer_idx ON jinji_transfer_items(transfer_id, sort)`);
 
   await safeDdl(() => sql`
     CREATE TABLE IF NOT EXISTS jinji_transfer_approvals (

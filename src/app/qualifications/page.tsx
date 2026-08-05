@@ -1,4 +1,5 @@
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { listQualificationMasters, listQualifications } from "@/lib/qualifications";
 import { listEmployeeOptions, getEmployee } from "@/lib/employees";
 import { daysUntil, todayJST } from "@/lib/dates";
@@ -17,7 +18,8 @@ export default async function QualificationsPage({
 }: {
   searchParams: Promise<{ employee?: string; category?: string; expiring?: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
   const { employee = "", category = "all", expiring = "" } = await searchParams;
   const today = todayJST();
 
@@ -27,8 +29,9 @@ export default async function QualificationsPage({
       category: (category === "all" ? "all" : category) as QualificationCategory | "all",
       expiringOnly: expiring === "1",
       today,
+      scopeOrgIds: scope.orgUnitIds,
     }),
-    listEmployeeOptions(),
+    listEmployeeOptions(scope.orgUnitIds),
     listQualificationMasters(),
     employee ? getEmployee(employee) : Promise.resolve(null),
   ]);

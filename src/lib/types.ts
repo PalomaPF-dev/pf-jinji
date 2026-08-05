@@ -356,7 +356,40 @@ export interface Transfer {
   /** 情報ｼｽﾃﾑ部記入欄：部門コード（8桁）と名称 */
   systemDeptCode: string | null;
   systemDeptName: string | null;
+
+  /** 一括申請（別紙つき）か。true なら対象は items が持ち、employee_id は代表者 */
+  isBulk: boolean;
+  /** 別紙の人数（一括申請のみ。単独申請は 0） */
+  itemCount: number;
 }
+
+/** 一括異動申請の別紙1行＝1人の異動。 */
+export interface TransferItem {
+  id: string;
+  transferId: string;
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  fromOrgUnitId: string | null;
+  fromOrgUnitCode: string | null;
+  fromOrgUnitName: string | null;
+  toOrgUnitId: string | null;
+  toOrgUnitCode: string | null;
+  toOrgUnitName: string | null;
+  effectiveDate: string | null;
+  reason: string | null;
+  sort: number;
+}
+
+/** 別紙の「理由」でよく使う定型句（自由入力の補助）。 */
+export const TRANSFER_REASON_SUGGESTIONS = [
+  "負荷変動の為",
+  "生産計画に伴うライン編成見直しの為",
+  "病欠復帰",
+  "退職の為有給消化",
+  "設備移管による組織変更",
+  "その他",
+] as const;
 
 /**
  * 異動申請書 J-426(9) の【承認】欄（捺印枠）。

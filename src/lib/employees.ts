@@ -58,6 +58,8 @@ export interface EmployeeFilter {
   q?: string;
   orgUnitId?: string | null;
   status?: EmploymentStatus | "all";
+  /** 表示範囲（管理者の工場スコープ）。null は全体 */
+  scopeOrgIds?: string[] | null;
 }
 
 /**
@@ -72,6 +74,7 @@ export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employ
   const status = filter.status ?? "active";
   const statusFilter = status === "all" ? null : normalizeEmploymentStatus(status);
   const orgUnitId = filter.orgUnitId || null;
+  const scope = filter.scopeOrgIds ?? null;
 
   // 条件は SQL 側で COALESCE により「未指定なら素通り」にする
   // （tagged template を組み立てずに済み、プレースホルダの取り違えも起きない）。
@@ -81,6 +84,7 @@ export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employ
     LEFT JOIN jinji_org_units o ON o.id = e.org_unit_id
     WHERE (${statusFilter}::text IS NULL OR e.status = ${statusFilter})
       AND (${orgUnitId}::uuid IS NULL OR e.org_unit_id = ${orgUnitId})
+      AND (${scope}::uuid[] IS NULL OR e.org_unit_id = ANY(${scope}::uuid[]))
       AND (${like}::text IS NULL
            OR e.employee_no ILIKE ${like}
            OR e.name ILIKE ${like}
@@ -215,9 +219,9 @@ export async function deleteEmployee(id: string): Promise<void> {
 }
 
 /** 上長候補・異動対象の選択用（軽量な一覧）。 */
-export async function listEmployeeOptions(): Promise<
-  { id: string; employeeNo: string; name: string; orgUnitName: string | null }[]
-> {
+export async function listEmployeeOptions(
+  scopeOrgIds: string[] | null = null,
+): Promise<{ id: string; employeeNo: string; name: string; orgUnitName: string | null }[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql`
@@ -225,6 +229,7 @@ export async function listEmployeeOptions(): Promise<
     FROM jinji_employees e
     LEFT JOIN jinji_org_units o ON o.id = e.org_unit_id
     WHERE e.status <> 'retired'
+      AND (${scopeOrgIds}::uuid[] IS NULL OR e.org_unit_id = ANY(${scopeOrgIds}::uuid[]))
     ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
   return rows.map((r) => ({
     id: r.id as string,

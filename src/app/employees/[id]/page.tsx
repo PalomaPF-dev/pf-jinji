@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
+import { getScope, inScope } from "@/lib/scope";
 import { getEmployee } from "@/lib/employees";
 import { todayJST } from "@/lib/dates";
 import { ageAt, formatDate, tenureAt } from "@/lib/format";
@@ -42,6 +43,9 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   const e = await getEmployee(id);
   if (!e) notFound();
+  // 管理者は自分の工場の社員だけ見られる（範囲外はURL直打ちでも開けない）
+  const scope = await getScope(s.grant);
+  if (!inScope(scope, e.orgUnitId)) notFound();
   const today = todayJST();
 
   return (

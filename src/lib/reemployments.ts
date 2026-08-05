@@ -99,6 +99,8 @@ export interface ReemploymentFilter {
   employeeId?: string | null;
   status?: ReemploymentStatus | "all";
   q?: string;
+  /** 表示範囲（管理者の工場スコープ）。null は全体 */
+  scopeOrgIds?: string[] | null;
 }
 
 export async function listReemployments(filter: ReemploymentFilter = {}): Promise<Reemployment[]> {
@@ -108,6 +110,7 @@ export async function listReemployments(filter: ReemploymentFilter = {}): Promis
   const status = filter.status && filter.status !== "all" ? filter.status : null;
   const q = (filter.q ?? "").trim();
   const like = q ? `%${q}%` : null;
+  const scope = filter.scopeOrgIds ?? null;
 
   const rows = await sql`
     SELECT r.*, e.employee_no, e.name AS employee_name
@@ -115,6 +118,7 @@ export async function listReemployments(filter: ReemploymentFilter = {}): Promis
     JOIN jinji_employees e ON e.id = r.employee_id
     WHERE (${employeeId}::uuid IS NULL OR r.employee_id = ${employeeId})
       AND (${status}::text IS NULL OR r.status = ${status})
+      AND (${scope}::uuid[] IS NULL OR e.org_unit_id = ANY(${scope}::uuid[]))
       AND (${like}::text IS NULL
            OR r.doc_no ILIKE ${like}
            OR e.name ILIKE ${like}

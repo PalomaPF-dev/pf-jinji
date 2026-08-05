@@ -9,7 +9,9 @@ import type { ReemploymentEmployeeChoice } from "@/components/ReemploymentForm";
  * 契約満了に伴う申請なので**退職済みは除く**が、雇用体系での絞り込みはしない
  * （正社員の定年後再雇用など、運用の幅を狭めないため）。
  */
-export async function listReemploymentTargets(): Promise<ReemploymentEmployeeChoice[]> {
+export async function listReemploymentTargets(
+  scopeOrgIds: string[] | null = null,
+): Promise<ReemploymentEmployeeChoice[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql`
@@ -18,6 +20,7 @@ export async function listReemploymentTargets(): Promise<ReemploymentEmployeeCho
     FROM jinji_employees e
     LEFT JOIN jinji_org_units o ON o.id = e.org_unit_id
     WHERE e.status <> 'retired'
+      AND (${scopeOrgIds}::uuid[] IS NULL OR e.org_unit_id = ANY(${scopeOrgIds}::uuid[]))
     ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
   return rows.map((r) => ({
     id: r.id as string,

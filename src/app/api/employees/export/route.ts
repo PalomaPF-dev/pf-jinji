@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOptionalGrant } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { recordAudit } from "@/lib/audit";
 import { toCsv } from "@/lib/csv";
 import { EMPLOYEE_CSV_HEADERS, employeeToCsvRow, listEmployees } from "@/lib/employees";
@@ -23,12 +24,14 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q") ?? "";
   const org = req.nextUrl.searchParams.get("org") ?? "";
   const status = req.nextUrl.searchParams.get("status") ?? "active";
+  const scope = await getScope(grant);
 
   const [employees, orgUnits] = await Promise.all([
     listEmployees({
       q,
       orgUnitId: org || null,
       status: (status === "all" ? "all" : status) as EmploymentStatus | "all",
+      scopeOrgIds: scope.orgUnitIds,
     }),
     listOrgUnits(),
   ]);

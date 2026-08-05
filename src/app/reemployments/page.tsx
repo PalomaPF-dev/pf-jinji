@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
+import { getScope } from "@/lib/scope";
 import { listReemployments } from "@/lib/reemployments";
 import { getEmployee } from "@/lib/employees";
 import { formatDate } from "@/lib/format";
@@ -22,7 +23,8 @@ export default async function ReemploymentsPage({
 }: {
   searchParams: Promise<{ employee?: string; status?: string; q?: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
+  const scope = await getScope(s.grant);
   const { employee = "", status = "all", q = "" } = await searchParams;
 
   const [items, target] = await Promise.all([
@@ -30,6 +32,7 @@ export default async function ReemploymentsPage({
       employeeId: employee || null,
       status: (status === "all" ? "all" : status) as ReemploymentStatus | "all",
       q,
+      scopeOrgIds: scope.orgUnitIds,
     }),
     employee ? getEmployee(employee) : Promise.resolve(null),
   ]);
