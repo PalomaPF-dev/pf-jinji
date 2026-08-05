@@ -12,6 +12,7 @@ import {
   looksLikeDatesSheet,
   looksLikeRoster,
 } from "@/lib/rosterImport";
+import { importHrMaster, looksLikeHrMaster } from "@/lib/hrMasterImport";
 import {
   createEmployee,
   deleteEmployee,
@@ -187,6 +188,40 @@ export async function importEmployeesAction(_prev: ActionState, form: FormData):
   try {
     if (isXlsx) {
       const sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
+
+      // 人事マスタ（階層＋承認者の2シート）→ 組織図と台帳（所属・管理者）を作り直す
+      if (looksLikeHrMaster(sheets)) {
+        const result = await importHrMaster(sheets);
+        await recordAudit({
+          actorLoginId: s.grant.loginId,
+          actorName: s.grant.name,
+          action: "update_employee",
+          targetType: "employee",
+          targetLabel: "人事マスタ（階層・承認者）の取込",
+          detail: {
+            org: result.org,
+            employees: result.employees,
+          },
+        });
+        revalidatePath("/employees");
+        revalidatePath("/org");
+        const o = result.org;
+        const em = result.employees;
+        const orgParts = [
+          o.rootsCreated ? `本部 ${o.rootsCreated} 件` : "",
+          o.groupsCreated ? `部署 ${o.groupsCreated} 件` : "",
+          o.unitsCreated ? `組織 ${o.unitsCreated} 件` : "",
+          o.moved ? `付け替え ${o.moved} 件` : "",
+          o.renamed ? `改称 ${o.renamed} 件` : "",
+        ].filter(Boolean);
+        return {
+          message:
+            `人事マスタを取り込みました（社員: 更新 ${em.updated} 名 / 新規 ${em.created} 名 / ` +
+            `管理者設定 ${em.managersSet} 名 / 管理者未確定(N/A) ${em.managersUnknown} 名` +
+            `${orgParts.length ? ` ・組織: ${orgParts.join(" / ")}` : " ・組織: 変更なし"}）`,
+        };
+      }
+
       const sheet = (wantSheet && sheets.find((x) => x.name === wantSheet)) || sheets[0];
       // 見出しが1行目とは限らない（権限マスタは1行目が空で2行目が見出し）。
       // 先頭10行から「社員番号」を含む行を探し、それより上は捨てる。

@@ -29,7 +29,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -199,6 +199,10 @@ async function buildSchema(): Promise<void> {
   await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS payroll_org_name TEXT`);
   await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS account_org_code TEXT`);
   await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS account_org_name TEXT`);
+  // 管理者（承認者）。人事マスタの「一般とその管理者・管理者とその承認者」の一覧から入る。
+  // 社員番号で持つ（管理者の社員レコードが後から入っても壊れないように）。
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS manager_employee_no TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_employees ADD COLUMN IF NOT EXISTS manager_name TEXT`);
 
   // ===== 異動申請書 =====
   await safeDdl(() => sql`

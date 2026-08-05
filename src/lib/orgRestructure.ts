@@ -1,5 +1,6 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
+import { normalizeOrgName } from "./hrMasterImport";
 
 /**
  * 組織名称から中間層を組み立てる（本部 → 工場/部 → 職場/室）。
@@ -52,11 +53,14 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
 
   const units = await sql`SELECT id, code, name, parent_id FROM jinji_org_units`;
   const byId = new Map(units.map((u: any) => [u.id as string, u]));
+  // 同名の判定は表記ゆれ（半角カナ・小さいッ）を吸収して行う。
+  // 人事マスタ側は「ロジスティクス部」、名簿側は「ﾛｼﾞｽﾃｨｸｽ部」のように揺れるため。
   const byName = new Map<string, any[]>();
   for (const u of units) {
-    const list = byName.get(u.name as string) ?? [];
+    const key = normalizeOrgName(u.name as string);
+    const list = byName.get(key) ?? [];
     list.push(u);
-    byName.set(u.name as string, list);
+    byName.set(key, list);
   }
 
   /** 最上位の祖先（中間層の親にする本部）。循環しても止まる。 */
@@ -72,8 +76,15 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
     return cur;
   };
 
-  // 8桁コードの組織を、名称の規則でグループ分けする
-  const leaves = units.filter((u: any) => /^\d{8}$/.test(u.code as string));
+  // 8桁コードの組織を、名称の規則でグループ分けする。
+  // 対象は**本部直下に平らに置かれている組織だけ**。すでに深い階層に居る組織は、
+  // 人事マスタの取込や手作業で組まれた配置なので触らない（取り合いを防ぐ）。
+  const isFlat = (u: any): boolean => {
+    if (!u.parent_id) return true;
+    const parent = byId.get(u.parent_id);
+    return !parent || !parent.parent_id;
+  };
+  const leaves = units.filter((u: any) => /^\d{8}$/.test(u.code as string) && isFlat(u));
   const needed = new Map<string, { rootId: string | null; leaf: any[] }>();
   for (const leaf of leaves) {
     const key = groupKeyOf(leaf.name as string);
@@ -93,8 +104,16 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
     // 同じ本部の配下にある同名組織だけを親候補にする。
     // ポータル同期由来の「第二工場」「調達部」など、別系統の同名組織を
     // 親に使うと、職場が本部の外へ移ってしまう。
-    const candidates = byName.get(key) ?? [];
-    const existing = candidates.find((c) => rootOf(c).id === g.rootId) ?? null;
+    // 同じ本部配下の候補のうち、部署（AUTO- 等）を8桁の所属組織より優先する。
+    // 「ﾛｼﾞｽﾃｨｸｽ部」のように部署と同名の8桁組織があるとき、8桁側を親にすると
+    // 人事マスタ取込（部署を親にする）と取り込むたびに親が入れ替わってしまうため。
+    const existing =
+      (byName.get(normalizeOrgName(key)) ?? [])
+        .filter((c) => rootOf(c).id === g.rootId)
+        .sort(
+          (a, b) =>
+            (/^\d{8}$/.test(a.code as string) ? 1 : 0) - (/^\d{8}$/.test(b.code as string) ? 1 : 0),
+        )[0] ?? null;
     if (existing) {
       middleIdByKey.set(key, existing.id as string);
     } else {

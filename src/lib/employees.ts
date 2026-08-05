@@ -43,6 +43,8 @@ function mapEmployee(r: any): Employee {
     payrollOrgName: r.payroll_org_name ?? null,
     accountOrgCode: r.account_org_code ?? null,
     accountOrgName: r.account_org_name ?? null,
+    managerEmployeeNo: r.manager_employee_no ?? null,
+    managerName: r.manager_name ?? null,
     status: normalizeEmploymentStatus(r.status),
     retireDate: toISODate(r.retire_date),
     email: r.email ?? null,
