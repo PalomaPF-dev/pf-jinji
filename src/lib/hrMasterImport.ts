@@ -122,7 +122,7 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
   const rows = parseHierarchy(sheet);
   const result = { rootsCreated: 0, groupsCreated: 0, unitsCreated: 0, renamed: 0, moved: 0 };
 
-  const units = await sql`SELECT id, code, name, parent_id FROM jinji_org_units`;
+  const units = await sql`SELECT id, code, name, parent_id, dept_code, workplace_code FROM jinji_org_units`;
   const byCode = new Map(units.map((u: any) => [u.code as string, u]));
   const byId = new Map(units.map((u: any) => [u.id as string, u]));
   const rootOf = (u: any): any => {
@@ -196,12 +196,17 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
         await sql`UPDATE jinji_org_units SET parent_id = ${rootId}, updated_at = NOW() WHERE id = ${existing.id}`;
         result.moved++;
       }
+      // 部署コードは表示用の識別子。変わっていたら黙って寄せる（件数には数えない）
+      if ((existing.dept_code as string | null) !== d.code) {
+        await sql`UPDATE jinji_org_units SET dept_code = ${d.code}, updated_at = NOW() WHERE id = ${existing.id}`;
+        existing.dept_code = d.code;
+      }
     } else {
       const code = `AUTO-${name}`;
       const ins = await sql`
-        INSERT INTO jinji_org_units (code, name, kind, parent_id)
-        VALUES (${code}, ${name}, ${name.endsWith("工場") ? "factory" : "bu"}, ${rootId})
-        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+        INSERT INTO jinji_org_units (code, name, kind, parent_id, dept_code)
+        VALUES (${code}, ${name}, ${name.endsWith("工場") ? "factory" : "bu"}, ${rootId}, ${d.code})
+        ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, dept_code = EXCLUDED.dept_code
         RETURNING id, (xmax = 0) AS created`;
       groupIdByDeptCode.set(d.code, ins[0].id as string);
       if (ins[0].created) result.groupsCreated++;
@@ -241,6 +246,8 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
   for (const r of ordered) {
     const existing = byCode.get(r.orgCode) ?? newLeafByCode.get(r.orgCode);
     const parentId = parentOf(r);
+    // 職場コード＝所属組織コード（8桁）。部署コードは #N/A なら既存を残す
+    const wantDept = r.deptCode ?? null;
     if (existing) {
       const u: any = existing;
       const rename = u.name !== undefined && (u.name as string) !== r.orgName;
@@ -248,22 +255,30 @@ export async function importOrgHierarchy(sheet: XlsxSheet): Promise<HrMasterResu
       // 名称ルールの自動整理が組んだ階層（調達部の下など）を消さないため。
       const reparent =
         r.deptCode !== null && u.parent_id !== undefined && u.parent_id !== parentId;
-      if (rename || reparent) {
+      const recode =
+        u.workplace_code !== undefined &&
+        ((u.workplace_code as string | null) !== r.orgCode ||
+          (wantDept !== null && (u.dept_code as string | null) !== wantDept));
+      if (rename || reparent || recode) {
         const nextParent = reparent ? parentId : (u.parent_id ?? null);
+        const nextDept = wantDept ?? ((u.dept_code as string | null) ?? null);
         await sql`
           UPDATE jinji_org_units
-          SET name = ${r.orgName}, parent_id = ${nextParent}, updated_at = NOW()
+          SET name = ${r.orgName}, parent_id = ${nextParent},
+              dept_code = ${nextDept}, workplace_code = ${r.orgCode}, updated_at = NOW()
           WHERE id = ${u.id}`;
         if (rename) result.renamed++;
         if (reparent) result.moved++;
         u.name = r.orgName;
         u.parent_id = nextParent;
+        u.dept_code = nextDept;
+        u.workplace_code = r.orgCode;
       }
     } else {
       const kind = r.orgName.includes("工場長") ? "workplace" : r.level >= 4 ? "kakari" : "workplace";
       const ins = await sql`
-        INSERT INTO jinji_org_units (code, name, kind, parent_id)
-        VALUES (${r.orgCode}, ${r.orgName}, ${kind}, ${parentId})
+        INSERT INTO jinji_org_units (code, name, kind, parent_id, dept_code, workplace_code)
+        VALUES (${r.orgCode}, ${r.orgName}, ${kind}, ${parentId}, ${wantDept}, ${r.orgCode})
         ON CONFLICT (code) DO NOTHING
         RETURNING id`;
       if (ins.length > 0) {

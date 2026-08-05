@@ -29,7 +29,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -151,6 +151,10 @@ async function buildSchema(): Promise<void> {
   await safeDdl(() => sql`
     CREATE UNIQUE INDEX IF NOT EXISTS jinji_org_units_portal_wp_uq
     ON jinji_org_units(portal_workplace_code) WHERE portal_workplace_code IS NOT NULL`);
+  // 人事マスタ（階層シート）由来のコード。部署コードは工場・部の、職場コードは
+  // 所属組織（8桁）の識別子。unit の code とは別に持つ（AUTO- 等の内部コードと分けるため）。
+  await safeDdl(() => sql`ALTER TABLE jinji_org_units ADD COLUMN IF NOT EXISTS dept_code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_org_units ADD COLUMN IF NOT EXISTS workplace_code TEXT`);
 
   // ===== 人事マスター =====
   // employee_no はポータルの login_id と同じ値を使う（SSO・権限連携の突合キー）。

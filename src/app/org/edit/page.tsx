@@ -66,10 +66,11 @@ export default async function OrgEditPage({
         />
 
         <section className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
-                <th className="px-4 py-3 font-medium">コード</th>
+                <th className="px-4 py-3 font-medium">部署コード</th>
+                <th className="px-4 py-3 font-medium">職場コード</th>
                 <th className="px-4 py-3 font-medium">組織名</th>
                 <th className="px-4 py-3 font-medium">区分</th>
                 <th className="px-4 py-3 font-medium">上位組織</th>
@@ -82,7 +83,10 @@ export default async function OrgEditPage({
             <tbody>
               {units.map((u) => (
                 <tr key={u.id} className="border-b border-[#f0f0f0] last:border-0 hover:bg-[#fafafa]">
-                  <td className="px-4 py-3 font-mono text-xs text-[#707070]">{u.code}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-[#707070]">{u.deptCode ?? "—"}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-[#707070]">
+                    {u.workplaceCode ?? (/^\d{8}$/.test(u.code) ? u.code : "—")}
+                  </td>
                   <td className="px-4 py-3">
                     <Link href={`/org/edit?id=${u.id}`} className="font-medium text-[#2563eb] hover:underline">
                       {u.name}

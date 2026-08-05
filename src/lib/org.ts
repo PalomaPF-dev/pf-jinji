@@ -18,6 +18,8 @@ function mapOrgUnit(r: any): OrgUnit {
     headEmployeeId: r.head_employee_id ?? null,
     portalDeptCode: r.portal_dept_code ?? null,
     portalWorkplaceCode: r.portal_workplace_code ?? null,
+    deptCode: r.dept_code ?? null,
+    workplaceCode: r.workplace_code ?? null,
     description: r.description ?? null,
     validFrom: toISODate(r.valid_from),
     validTo: toISODate(r.valid_to),
