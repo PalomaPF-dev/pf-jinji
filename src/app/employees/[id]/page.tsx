@@ -91,6 +91,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <h2 className="mb-3 text-sm font-bold text-[#333333]">所属・処遇</h2>
           <dl>
             <Row label="所属" value={e.orgUnitName ?? "（未配置）"} />
+            <OptionalRow label="管理者（承認者）" value={e.managerName} code={e.managerEmployeeNo} />
             <OptionalRow label="役職" value={e.positionName} code={e.positionCode} />
             <OptionalRow label="職務" value={e.dutyName} code={e.dutyCode} />
             <OptionalRow label="等級" value={e.grade} code={e.gradeCode} />

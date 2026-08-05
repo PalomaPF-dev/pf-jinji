@@ -158,6 +158,9 @@ export interface Employee {
   payrollOrgName: string | null;
   accountOrgCode: string | null;
   accountOrgName: string | null;
+  /** 管理者（承認者）。人事マスタの一覧から入る */
+  managerEmployeeNo: string | null;
+  managerName: string | null;
   status: EmploymentStatus;
   retireDate: string | null;
   email: string | null;
