@@ -53,6 +53,12 @@ export default async function EmployeeSalaryPage({
               <div className="text-2xl font-bold text-[#333333]">{formatYen(current.baseSalary)}</div>
             </div>
             <div>
+              <div className="text-xs text-[#909090]">手当計</div>
+              <div className="text-lg font-medium text-[#333333]">
+                {formatYen(salaryTotal(current) - current.baseSalary)}
+              </div>
+            </div>
+            <div>
               <div className="text-xs text-[#909090]">支給計（基本給＋手当）</div>
               <div className="text-lg font-medium text-[#333333]">{formatYen(salaryTotal(current))}</div>
             </div>
@@ -87,13 +93,15 @@ export default async function EmployeeSalaryPage({
           <EmptyState title="改定履歴がありません" />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
                   <th className="px-4 py-3 font-medium">適用開始</th>
                   <th className="px-4 py-3 font-medium">区分</th>
                   <th className="px-4 py-3 text-right font-medium">基本給</th>
+                  <th className="px-4 py-3 text-right font-medium">手当計</th>
                   <th className="px-4 py-3 text-right font-medium">支給計</th>
+                  <th className="px-4 py-3 font-medium">内訳（手当）</th>
                   <th className="px-4 py-3 font-medium">決裁</th>
                   <th className="px-4 py-3 font-medium"> </th>
                 </tr>
@@ -110,7 +118,13 @@ export default async function EmployeeSalaryPage({
                       {h.reason && <div className="text-xs text-[#909090] no-underline">{h.reason}</div>}
                     </td>
                     <td className="px-4 py-3 text-right">{formatYen(h.baseSalary)}</td>
+                    <td className="px-4 py-3 text-right">{formatYen(salaryTotal(h) - h.baseSalary)}</td>
                     <td className="px-4 py-3 text-right">{formatYen(salaryTotal(h))}</td>
+                    <td className="max-w-[300px] px-4 py-3 text-[10px] leading-relaxed text-[#707070]">
+                      {h.allowances.length > 0
+                        ? h.allowances.map((a) => `${a.name} ${formatYen(a.amount)}`).join("、")
+                        : "—"}
+                    </td>
                     <td className="px-4 py-3 text-xs">
                       {h.decidedName ?? "—"}
                       <div className="text-[#909090]">{formatDate(h.createdAt?.slice(0, 10) ?? null)}</div>
