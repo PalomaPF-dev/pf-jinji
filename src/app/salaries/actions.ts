@@ -2,6 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { assertPayrollSession } from "@/lib/session";
+import { readXlsx } from "@/lib/xlsx";
+import {
+  effectiveFromOfSheetName,
+  findHeaderRow,
+  importBonusMaster,
+  looksLikeBonusMaster,
+} from "@/lib/bonusImport";
 import { recordAudit } from "@/lib/audit";
 import { formValues, type FormValues } from "@/lib/formState";
 import { createSalary, validateSalary, voidSalary, type SalaryInput } from "@/lib/salaries";
@@ -106,4 +113,105 @@ export async function voidSalaryAction(
   revalidatePath("/salaries");
   if (employeeId) revalidatePath(`/salaries/${employeeId}`);
   return { message: "この改定を取り消しました。" };
+}
+
+
+export interface BonusImportActionState {
+  error?: string;
+  message?: string;
+  missing?: string[];
+  errors?: { row: number; employeeNo: string; message: string }[];
+}
+
+/**
+ * 賞与マスタ（給与・考課のExcel）の取込。
+ * 給与は can_payroll が前提（このアクション自体のゲート）。
+ * 考課は can_evaluation を持っている場合だけ取り込み、無ければ給与のみで続ける。
+ */
+export async function importBonusMasterAction(
+  _prev: BonusImportActionState,
+  form: FormData,
+): Promise<BonusImportActionState> {
+  const s = await assertPayrollSession();
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "Excelファイルを選んでください。" };
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    return { error: "ファイルが大きすぎます（15MBまで）。" };
+  }
+
+  let sheets;
+  try {
+    sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
+  } catch (e) {
+    return { error: `ファイルを読み取れませんでした: ${(e as Error).message}` };
+  }
+  const wantSheet = (form.get("sheet") ?? "").toString().trim();
+  const sheet =
+    (wantSheet && sheets.find((x) => x.name === wantSheet)) ||
+    sheets.find((x) => looksLikeBonusMaster(x)) ||
+    sheets[0];
+  if (findHeaderRow(sheet) < 0) {
+    return { error: `シート「${sheet.name}」に見出し行（社員番号）が見つかりません。` };
+  }
+
+  const effectiveFrom =
+    (form.get("effectiveFrom") ?? "").toString().trim() ||
+    effectiveFromOfSheetName(sheet.name);
+  if (!effectiveFrom) {
+    return { error: "適用開始年月が分かりません。シート名に年月が無い場合は指定してください。" };
+  }
+
+  const includeEvaluations = s.grant.canEvaluation;
+  const result = await importBonusMaster(sheet, {
+    effectiveFrom,
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    includeEvaluations,
+  });
+
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_payroll",
+    targetType: "salary",
+    targetLabel: `賞与マスタ取込（${sheet.name}）`,
+    detail: {
+      effectiveFrom,
+      salariesCreated: result.salariesCreated,
+      salariesUpdated: result.salariesUpdated,
+      evaluationsCreated: result.evaluationsCreated,
+      missing: result.missing.length,
+      errorCount: result.errors.length,
+    },
+  });
+  if (includeEvaluations && result.evaluationsCreated > 0) {
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_evaluation",
+      targetType: "evaluation",
+      targetLabel: `賞与マスタ取込（${sheet.name}）`,
+      detail: { created: result.evaluationsCreated, skipped: result.evaluationsSkipped },
+    });
+  }
+  revalidatePath("/salaries");
+  revalidatePath("/evaluations");
+
+  const parts = [
+    `給与 新規 ${result.salariesCreated} 件 / 更新 ${result.salariesUpdated} 件`,
+  ];
+  if (includeEvaluations) {
+    parts.push(`考課 新規 ${result.evaluationsCreated} 件（既存 ${result.evaluationsSkipped} 件は保持）`);
+  } else {
+    parts.push("考課は権限が無いため取り込みませんでした");
+  }
+  if (result.missing.length) parts.push(`台帳に居ない ${result.missing.length} 名は対象外`);
+  if (result.errors.length) parts.push(`エラー ${result.errors.length} 件`);
+  return {
+    message: `取り込みました（適用 ${effectiveFrom} / ${parts.join(" / ")}）`,
+    missing: result.missing,
+    errors: result.errors,
+  };
 }

@@ -14,7 +14,7 @@ import { todayJST } from "@/lib/dates";
 import PageHeader from "@/components/PageHeader";
 import OrgUnitForm from "@/components/OrgUnitForm";
 import OrgDeleteForm from "@/components/OrgDeleteForm";
-import PortalSyncForm from "@/components/PortalSyncForm";
+import PortalSyncForm, { RestructureForm } from "@/components/PortalSyncForm";
 import { ORG_KIND_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +56,7 @@ export default async function OrgEditPage({
 
       <div className="space-y-5">
         {s.grant.isOwner && <PortalSyncForm />}
+        {s.grant.isOwner && <RestructureForm />}
 
         <OrgUnitForm
           key={editing?.id ?? "new"}

@@ -86,16 +86,30 @@ function unescapeXml(s: string): string {
 }
 
 /**
+ * <si> や inlineStr の中身から本文だけを取り出す。
+ *
+ * 日本語の Excel はセルに**ふりがな**（<rPh>…</rPh>）を隠し持っていて、
+ * その中にも <t> がある。単純に <t> を全部つなぐと「給与月額」が
+ * 「給与月額キュウヨゲツガク」になり、見出しの突合が全滅する。
+ * ふりがなを取り除いてから本文の <t> を連結する。
+ */
+function textOf(inner: string): string {
+  const cleaned = inner
+    .replace(/<rPh[\s\S]*?<\/rPh>/g, "")
+    .replace(/<phoneticPr[^>]*\/>/g, "");
+  let text = "";
+  for (const t of cleaned.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) text += t[1];
+  return unescapeXml(text);
+}
+
+/**
  * 共有文字列表。Excel は同じ文字列を1か所にまとめ、セルからは添字で参照する。
  * リッチテキスト（<si> の中に <r> が複数）は連結して1つの文字列にする。
  */
 function parseSharedStrings(xml: string): string[] {
   const out: string[] = [];
   for (const m of xml.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
-    const inner = m[1];
-    let text = "";
-    for (const t of inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) text += t[1];
-    out.push(unescapeXml(text));
+    out.push(textOf(m[1]));
   }
   return out;
 }
@@ -111,9 +125,14 @@ function colToIndex(ref: string): number {
 /** シートXMLを行×列の文字列に変換する。 */
 function parseSheet(xml: string, shared: string[]): string[][] {
   const rows: string[][] = [];
-  for (const rowM of xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const rowM of xml.matchAll(/<row([^>]*)>([\s\S]*?)<\/row>/g)) {
+    // 空行は XML から丸ごと省かれる。r 属性（1始まりの行番号）で位置を合わせ、
+    // 「Excel の7行目」がこちらでも rows[6] になるようにする。
+    const rAttr = rowM[1].match(/\br="(\d+)"/);
+    const rowAt = rAttr ? Number(rAttr[1]) - 1 : rows.length;
+    while (rows.length < rowAt) rows.push([]);
     const cells: string[] = [];
-    for (const cM of rowM[1].matchAll(/<c([^>]*)>([\s\S]*?)<\/c>/g)) {
+    for (const cM of rowM[2].matchAll(/<c([^>]*)>([\s\S]*?)<\/c>/g)) {
       const attrs = cM[1];
       const body = cM[2];
       const refM = attrs.match(/r="([A-Z]+)\d+"/);
@@ -125,9 +144,7 @@ function parseSheet(xml: string, shared: string[]): string[][] {
         const i = v === undefined ? -1 : Number(v);
         value = shared[i] ?? "";
       } else if (type === "inlineStr") {
-        let t = "";
-        for (const m of body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)) t += m[1];
-        value = unescapeXml(t);
+        value = textOf(body);
       } else {
         // 数値・文字列化された数式結果など。<v> をそのまま文字列として扱う
         const v = (body.match(/<v>([\s\S]*?)<\/v>/) ?? [])[1];
@@ -139,7 +156,7 @@ function parseSheet(xml: string, shared: string[]): string[][] {
       while (cells.length < at) cells.push("");
       cells[at] = value;
     }
-    rows.push(cells);
+    rows[rowAt] = cells;
   }
   return rows;
 }
