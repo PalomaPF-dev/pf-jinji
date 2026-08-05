@@ -45,6 +45,8 @@ export interface ChartNode {
   children: ChartNode[];
   /** 表で占める行数（子の行数の合計。葉は1） */
   span: number;
+  /** 階層の絞り込みで畳んだ配下（この枠より深い組織数・人数の合計） */
+  hidden?: { units: number; people: number };
 }
 
 export interface OrgChartData {
@@ -263,4 +265,35 @@ export function sliceChart(chart: OrgChartData, rootOrgId: string | null): OrgCh
   };
   walk(node);
   return { roots: [node], maxDepth, unassigned: [] };
+}
+
+/**
+ * 階層の絞り込み。maxLevels 階層（1始まり）までを表に出し、それより深い配下は
+ * 打ち切って「配下 ○組織 ○名」の要約に畳む。null なら絞らない。
+ */
+export function limitChartDepth(chart: OrgChartData, maxLevels: number | null): OrgChartData {
+  if (!maxLevels || maxLevels < 1) return chart;
+  const minDepth = chart.roots.length ? Math.min(...chart.roots.map((r) => r.depth)) : 0;
+  const cutoff = minDepth + maxLevels - 1;
+  if (cutoff >= chart.maxDepth) return chart;
+
+  const countUnits = (n: ChartNode): number =>
+    1 + n.children.reduce((s, c) => s + countUnits(c), 0);
+  const countPeople = (n: ChartNode): number =>
+    n.people.length + n.children.reduce((s, c) => s + countPeople(c), 0);
+
+  const clone = (n: ChartNode): ChartNode => {
+    if (n.depth >= cutoff && n.children.length > 0) {
+      const units = countUnits(n) - 1;
+      const people = countPeople(n) - n.people.length;
+      return { ...n, children: [], span: 1, hidden: { units, people } };
+    }
+    const children = n.children.map(clone);
+    return {
+      ...n,
+      children,
+      span: children.length === 0 ? 1 : children.reduce((s, c) => s + c.span, 0),
+    };
+  };
+  return { roots: chart.roots.map(clone), maxDepth: cutoff, unassigned: chart.unassigned };
 }

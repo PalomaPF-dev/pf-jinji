@@ -163,8 +163,15 @@ export default function OrgChartBoard({
                           <span className="ml-1 font-normal text-[#909090]">{node.people.length}名</span>
                         )}
                       </div>
+                      {node.hidden && (
+                        <p className="border-b border-[#f0f0f0] bg-[#fbfbfb] px-1.5 py-0.5 text-[10px] text-[#909090]">
+                          配下 {node.hidden.units}組織 {node.hidden.people}名（階層の絞り込みで省略）
+                        </p>
+                      )}
                       {node.people.length === 0 ? (
-                        <p className="px-1.5 py-1 text-[10px] text-[#c0c0c0]">所属者なし</p>
+                        <p className="px-1.5 py-1 text-[10px] text-[#c0c0c0]">
+                          {node.hidden ? "" : "所属者なし"}
+                        </p>
                       ) : (
                         <table className="w-full border-collapse">
                           <tbody>
