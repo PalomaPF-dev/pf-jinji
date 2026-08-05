@@ -72,6 +72,10 @@ export interface OrgUnit {
   portalDeptCode: string | null;
   /** ポータル職場（pf_portal_workplaces.code）との突合キー */
   portalWorkplaceCode: string | null;
+  /** 人事マスタ（階層シート）の部署コード */
+  deptCode: string | null;
+  /** 人事マスタの職場コード（所属組織コード・8桁） */
+  workplaceCode: string | null;
   description: string | null;
   validFrom: string | null;
   validTo: string | null;

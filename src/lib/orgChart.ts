@@ -54,6 +54,45 @@ export interface OrgChartData {
   unassigned: ChartPerson[];
 }
 
+/**
+ * 役職の序列。組織図の枠の中では役職が上の人から並べる。
+ * 名称は「工場長A」「課長心得」のように接尾辞が付くため、部分一致で判定する。
+ * どれにも当てはまらない役職（一般・その他・空欄）は末尾。
+ */
+// 「工場長」より「工場長代理」を先に検査する必要があるが、序列は 長 > 代理。
+// 検査順（配列の並び）と序列（rank）を分けて持つ。
+const POSITION_RANKS: { re: RegExp; rank: number }[] = [
+  { re: /本部長/, rank: 0 },
+  { re: /副工場長/, rank: 2 },
+  { re: /工場長代理/, rank: 3 },
+  { re: /工場長付/, rank: 4 },
+  { re: /工場長/, rank: 1 },
+  { re: /部長代理/, rank: 6 },
+  { re: /部長/, rank: 5 },
+  { re: /次長/, rank: 7 },
+  { re: /センター長|ｾﾝﾀｰ長/, rank: 8 },
+  { re: /室長/, rank: 9 },
+  { re: /課長代理/, rank: 11 },
+  { re: /課長心得/, rank: 12 },
+  { re: /課長/, rank: 10 },
+  { re: /グループ長|ｸﾞﾙｰﾌﾟ長/, rank: 13 },
+  { re: /係長心得/, rank: 15 },
+  { re: /係長/, rank: 14 },
+  { re: /班長/, rank: 16 },
+  { re: /主任代理/, rank: 18 },
+  { re: /主任/, rank: 17 },
+];
+
+/** 役職の序列（小さいほど上位）。該当なしは末尾。 */
+export function positionRank(positionName: string | null): number {
+  const p = (positionName ?? "").trim();
+  if (!p) return 99;
+  for (const { re, rank } of POSITION_RANKS) {
+    if (re.test(p)) return rank;
+  }
+  return 99;
+}
+
 /** 親の枠へ統合する組織か（「大口工場長」「大口工場長代理」「同名の部」など）。 */
 function mergesIntoParent(parentName: string, childName: string): boolean {
   const p = normalizeOrgName(parentName);
@@ -173,10 +212,12 @@ export async function buildOrgChart(
     host.people.push(person);
   }
 
-  // 枠の中の並び: 長（統合分）→ 自組織。同順位はカナ順のまま
+  // 枠の中の並び: 長（統合分）→ 自組織、その中では役職の序列の上から。同順位はカナ順のまま
   const sortPeople = (node: ChartNode) => {
     node.people.sort(
-      (a, b) => (unitRank.get(a.orgUnitId) ?? 99) - (unitRank.get(b.orgUnitId) ?? 99),
+      (a, b) =>
+        (unitRank.get(a.orgUnitId) ?? 99) - (unitRank.get(b.orgUnitId) ?? 99) ||
+        positionRank(a.positionName) - positionRank(b.positionName),
     );
     for (const c of node.children) sortPeople(c);
   };
