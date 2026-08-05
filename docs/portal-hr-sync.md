@@ -24,11 +24,24 @@ PF人事管理（`pf-jinji`）を**人のマスター**とし、ポータル（`
 | 情報 | マスター | 連携方向 |
 |---|---|---|
 | 氏名・所属・役職・職務・生年月日・入社日・雇用体系・在籍状態 | **人事管理** | 人事管理 → ポータル |
-| ログインID・パスワード・アプリ権限（role / can_manage / apps）・承認者 | **ポータル** | 連携しない（ポータルが保持） |
-| 部署・職場そのものの存在（コード・名称） | **ポータル** | ポータル → 人事管理（実装済み `/api/departments`・`/api/workplaces`） |
-| 組織の階層（本部→部→課→係）・組織の長 | **人事管理** | 連携しない（人事管理が保持） |
+| 部署・職場そのものの存在（コード・名称・親子） | **人事管理** | 人事管理 → ポータル（`organizations`） |
+| 管理者（承認者） | **人事管理** | 人事管理 → ポータル（`managerLoginId` → `approver_user_id`） |
+| アカウントの存在（社員番号） | **人事管理** | 人事管理 → ポータル（`createMissing`。パスワード未設定で発行） |
+| パスワード・アプリ権限（role / can_manage / 部署の apps 割当） | **ポータル** | 連携しない（ポータルが保持） |
+| 組織の階層（本部→工場/部→職場）・組織の長 | **人事管理** | 人事管理が保持（ポータルは部署→職場の2階層に潰して受ける） |
 
-この分担により、人事管理は**パスワードも権限も送らない**。ポータル側の権限運用は壊れない。
+人事管理が「人と組織」のマスター。ただし**パスワードと権限は送らない**ので、
+ポータル側の権限運用は壊れない。
+
+### 組織の突合（重要）
+
+ポータルの部署コード（`D001` 等）は既存の運用で使われているため**変えない**。
+人事管理側のコード（部署コード・職場コード）は `hr_code` 列で別に持ち、突合キーにする。
+
+1. `hr_code` が一致する行があればそれ
+2. 無ければ**名称が一致**する既存の部署・職場（ポータルの `code`・`apps` はそのまま、
+   `hr_code` だけを結び付ける＝**既存のアプリ割当を壊さない**）
+3. それも無ければ新規作成（`apps` は空。どのアプリを使うかはポータルで設定する）
 
 ## リクエスト
 
@@ -38,6 +51,13 @@ Content-Type: application/json
 
 {
   "key": "<PF_PROVISION_KEY>",
+  "createMissing": true,
+  "organizations": [
+    { "kind": "dept", "code": "12121102", "name": "大口工場",
+      "departmentCode": null, "isFactory": true, "sort": 1 },
+    { "kind": "workplace", "code": "12124001", "name": "大口工場 ﾌﾟﾚｽ1",
+      "departmentCode": "12121102", "isFactory": false, "sort": 2 }
+  ],
   "employees": [
     {
       "loginId": "E200",
@@ -51,7 +71,8 @@ Content-Type: application/json
       "employmentType": "正社員",
       "status": "active",
       "retireDate": null,
-      "email": "ichiro@example.com"
+      "email": "ichiro@example.com",
+      "managerLoginId": "E100"
     }
   ]
 }
@@ -64,17 +85,23 @@ Content-Type: application/json
 ```json
 {
   "results": [
-    { "loginId": "E200", "status": "updated", "reprovisioned": true },
+    { "loginId": "E200", "status": "updated", "reprovisioned": true, "approverSet": true },
+    { "loginId": "E201", "status": "created", "reprovisioned": true },
     { "loginId": "E999", "status": "error", "message": "部署コード D999 が見つかりません" }
-  ]
+  ],
+  "organizations": { "created": 206, "linked": 3, "updated": 0, "errors": [] }
 }
 ```
 
 | `status` | 意味 |
 |---|---|
+| `created` | アカウントを発行した（`createMissing` 指定時。パスワード未設定・権限は一般） |
 | `updated` | ポータル側の人事項目を更新した |
-| `skipped` | 何もしなかった（ポータルに未登録の社員番号） |
+| `skipped` | 何もしなかった（未登録かつ `createMissing` なし／退職者／所属が決まらない） |
 | `error` | 部署コード不一致など、その社員だけ失敗 |
+
+`organizations` は組織の連携結果。`created`＝新規作成、`linked`＝同名の既存へ紐づけ、
+`updated`＝名称・所属部署の更新。
 
 `reprovisioned` は「所属が変わったので各アプリへ再連携した」ことを示す。
 **所属が変わっていなくても役職や人事項目は更新される**ので、`updated` と
@@ -83,268 +110,41 @@ Content-Type: application/json
 
 ## 設計の要点
 
-1. **アカウントを勝手に作らない** — 既定では既存ユーザーの人事項目を更新するだけ。
-   ポータルに居ない社員番号は `skipped` として返す。アカウント発行はポータル側の
-   運用（管理画面・CSV一括登録）に任せる。
-   新規入社を人事管理から自動発行したい場合は、リクエストに `createMissing: true` を
-   足す拡張を後から入れられるようにしてある。
+1. **アカウントの発行は `createMissing` を指定したときだけ** — 指定すると、社員台帳に
+   居てポータルに未登録の社員を**パスワード未設定（招待状態）・権限は一般**で作る。
+   本人がポータルでパスワードを設定すれば使える。退職者と所属が決まらない社員は作らない。
+   指定しなければ従来どおり既存ユーザーの更新だけ（`skipped`）。
 2. **所属が変わったときだけ再連携する** — `provisionUsers()` は各アプリへHTTPを撒くため、
    毎回呼ぶと重い。部署・職場が実際に変わった人だけを対象にする。
 3. **退職者はアプリ利用を止める** — `status='retired'` を受けたら部署を外し、
    アプリへの再連携対象から除く（既存アカウントの扱いはポータルの運用に合わせる）。
 4. **認証は `PF_PROVISION_KEY`** — 既存のプロビジョニングと同じ共有鍵。
    タイミング安全に比較する。
-5. **再連携の役割・承認者はポータルの現在値から組み立てる** — 人事管理はこれらを
-   送ってこない。`provisionUsers()` へ渡すときに補わないと、`role` が既定の
-   `member` に落ち、承認者も消えてアプリ側の権限運用が壊れる
+5. **再連携の役割はポータルの現在値から組み立てる** — 人事管理は `role` を送ってこない。
+   補わないと既定の `member` に落ちてアプリ側の権限運用が壊れる
    （`api/users-refresh.js` と同じ組み立て方をしている）。
+   承認者は人事管理が正なので `managerLoginId` を優先し、無いときだけ
+   ポータルの規則（本人指定 → 職場の管理者 → 職場所属の管理者）で補う。
+6. **承認者は全員の行が揃ってから設定する** — 承認者本人が同じ連携で作られることが
+   あるため、社員の登録・更新を一巡してからまとめて解決する。
 
-## 参照実装（`pf-portal/api/hr-sync.js`）
+## 実装
 
-```js
-// PF人事管理（pf-jinji）からの人事情報連携の受け口。
-//
-// 人事管理が「人」のマスターで、ここへ所属・役職・人事プロフィールが送られてくる。
-// パスワード・アプリ権限（role / can_manage / apps 割当）・承認者は送られてこないし、
-// このAPIでも一切変更しない（それらはポータルが持つ情報のため）。
-//
-// 所属が変わった在籍者だけ、既存の provisionUsers() で各業務アプリへ再連携する。
-// これにより「人事管理で発令 → 各アプリの部署・権限が追従」が成立する。
-const crypto = require("crypto");
-const { requireSql, ensureSchema, readBody } = require("../lib/db");
-const { provisionUsers } = require("../lib/provision");
+実物は `pf-portal/api/hr-sync.js`（`claude/hr-master-app-dev-hvif4t` ブランチ）。
+ここに写しを置くと本体と乖離するため、**実装はそのファイルを見ること**。
 
-const MAX_EMPLOYEES = 500;
-const LOGIN_ID_RE = /^[A-Za-z0-9_@.-]{1,64}$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+処理の順序だけ記しておく。
 
-/** タイミング安全な鍵比較（長さ違いは即 false）。 */
-function safeKeyEqual(a, b) {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
+1. `organizations` を部署 → 職場の順に突合（`hr_code` → 名称 → 新規作成）
+2. 社員を1人ずつ処理。未登録は `createMissing` のときだけ発行、既存は人事項目と所属を更新
+3. 全員ぶんの行が揃ってから `managerLoginId` を `approver_user_id` へ解決
+4. 所属が変わった在籍者だけ `provisionUsers()` で各アプリへ再連携
 
-const nz = (v) => {
-  const s = (v ?? "").toString().trim();
-  return s === "" ? null : s;
-};
-const nzDate = (v) => {
-  const s = nz(v);
-  return s && DATE_RE.test(s) ? s : null;
-};
+## 検証
 
-// 承認者の解決: 本人の承認者指定 → 職場の管理者（指定） → 職場所属の管理者（社員番号順で最初）
-// （api/users.js・api/users-refresh.js と同じ規則。管理者は明示指定のみ）。
-async function resolveApproverLoginId(sql, approverUserId, workplaceId, role) {
-  if (approverUserId) {
-    const rows = await sql`SELECT login_id FROM pf_portal_users WHERE id = ${approverUserId} LIMIT 1`;
-    if (rows.length > 0) return rows[0].login_id;
-  }
-  if (role === "admin") return null;
-  if (workplaceId) {
-    const rows = await sql`
-      SELECT a.login_id
-      FROM pf_portal_workplaces w
-      JOIN pf_portal_users a ON a.id = w.admin_user_id
-      WHERE w.id = ${workplaceId}
-      LIMIT 1`;
-    if (rows.length > 0) return rows[0].login_id;
-    const fallback = await sql`
-      SELECT login_id FROM pf_portal_users
-      WHERE workplace_id = ${workplaceId} AND role = 'admin'
-      ORDER BY login_id
-      LIMIT 1`;
-    if (fallback.length > 0) return fallback[0].login_id;
-  }
-  return null;
-}
+`pf-jinji` の実データ（209組織・1,685名）を実DBへ流し、次を確認している。
 
-module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ message: "Method not allowed" });
-    return;
-  }
-  const provisionKey = (process.env.PF_PROVISION_KEY || "").trim();
-  if (!provisionKey) {
-    res.status(503).json({ message: "サーバー設定が未完了です（PF_PROVISION_KEY）" });
-    return;
-  }
-
-  const body = readBody(req);
-  if (!safeKeyEqual(String(body.key || ""), provisionKey)) {
-    res.status(401).json({ message: "認証に失敗しました" });
-    return;
-  }
-
-  const employees = body.employees;
-  if (!Array.isArray(employees) || employees.length === 0) {
-    res.status(400).json({ message: "employees を指定してください" });
-    return;
-  }
-  if (employees.length > MAX_EMPLOYEES) {
-    res.status(400).json({ message: `一度に送れるのは最大${MAX_EMPLOYEES}件です` });
-    return;
-  }
-
-  const sql = requireSql(res);
-  if (!sql) return;
-
-  try {
-    await ensureSchema(sql);
-
-    // 部署・職場コード → 行 の対応表
-    const depts = await sql`SELECT id, code, name, kind, apps FROM pf_portal_departments`;
-    const deptByCode = new Map(depts.map((d) => [d.code, d]));
-    const deptById = new Map(depts.map((d) => [d.id, d]));
-    const wps = await sql`SELECT id, code, department_id FROM pf_portal_workplaces`;
-    const wpByCode = new Map(wps.map((w) => [w.code, w]));
-
-    const results = [];
-    // 所属が実際に変わった人だけ再連携する（provisionUsers は各アプリへHTTPを撒くため）
-    const needsReprovision = [];
-
-    for (const e of employees) {
-      const loginId = (e?.loginId ?? "").toString().trim();
-      try {
-        if (!LOGIN_ID_RE.test(loginId)) {
-          results.push({ loginId, status: "error", message: "社員番号の形式が不正です" });
-          continue;
-        }
-
-        const cur = await sql`
-          SELECT id, login_id, name, email, role, department_id, workplace_id, approver_user_id
-          FROM pf_portal_users WHERE login_id = ${loginId} LIMIT 1`;
-        if (cur.length === 0) {
-          // ポータルに居ない社員番号。アカウント発行はポータル側の運用に任せる。
-          results.push({ loginId, status: "skipped", message: "ポータルに未登録" });
-          continue;
-        }
-        const u = cur[0];
-
-        const status = ["active", "leave", "loaned", "retired"].includes(e.status) ? e.status : "active";
-        const retired = status === "retired";
-
-        // 部署・職場の解決。退職者は所属を外す。
-        let deptId = u.department_id;
-        let wpId = u.workplace_id;
-        if (retired) {
-          deptId = null;
-          wpId = null;
-        } else {
-          const deptCode = nz(e.departmentCode);
-          if (deptCode) {
-            const d = deptByCode.get(deptCode);
-            if (!d) {
-              results.push({ loginId, status: "error", message: `部署コード ${deptCode} が見つかりません` });
-              continue;
-            }
-            deptId = d.id;
-          }
-          const wpCode = nz(e.workplaceCode);
-          if (wpCode) {
-            const w = wpByCode.get(wpCode);
-            if (!w) {
-              results.push({ loginId, status: "error", message: `職場コード ${wpCode} が見つかりません` });
-              continue;
-            }
-            if (deptId && w.department_id !== deptId) {
-              results.push({
-                loginId,
-                status: "error",
-                message: `職場 ${wpCode} は指定の部署の配下ではありません`,
-              });
-              continue;
-            }
-            wpId = w.id;
-          } else if (deptCode) {
-            // 部署だけ指定された＝職場は未所属にする
-            wpId = null;
-          }
-        }
-
-        const affiliationChanged = deptId !== u.department_id || wpId !== u.workplace_id;
-
-        // 人事項目と所属だけを更新する。role・can_manage・password_hash・
-        // approver_user_id には触れない（ポータルが持つ情報のため）。
-        await sql`
-          UPDATE pf_portal_users SET
-            name            = COALESCE(${nz(e.name)}, name),
-            department_id   = ${deptId},
-            workplace_id    = ${wpId},
-            position_name   = ${nz(e.positionName)},
-            duty_name       = ${nz(e.dutyName)},
-            birth_date      = ${nzDate(e.birthDate)},
-            hire_date       = ${nzDate(e.hireDate)},
-            employment_type = ${nz(e.employmentType)},
-            email           = COALESCE(${nz(e.email)}, email)
-          WHERE id = ${u.id}`;
-
-        // 所属が変わった在籍者だけ、各アプリへ再連携する。
-        // 役割・承認者・工場名はポータルの現在値から組み立てる（人事管理からは
-        // 送られてこないため、ここで補わないとアプリ側の権限が既定値に戻ってしまう）。
-        let reprovisioned = false;
-        if (affiliationChanged && !retired && deptId) {
-          const d = deptById.get(deptId);
-          const role = u.role === "admin" ? "admin" : "member";
-          let approverLoginId = await resolveApproverLoginId(sql, u.approver_user_id, wpId, role);
-          if (approverLoginId === u.login_id) approverLoginId = null;
-          needsReprovision.push({
-            id: u.id,
-            loginId,
-            name: nz(e.name) || u.name,
-            email: nz(e.email) || u.email,
-            apps: Array.isArray(d?.apps) ? d.apps : [],
-            factory: d && d.kind === "factory" ? d.name : null,
-            role,
-            approverLoginId,
-          });
-          reprovisioned = true;
-        }
-
-        // 行は必ず更新している。所属が変わったかは reprovisioned で別に伝える
-        // （所属据え置きで役職だけ変わった場合を「変更なし」と呼ぶと実態と食い違う）
-        results.push({ loginId, status: "updated", reprovisioned });
-      } catch (err) {
-        results.push({ loginId, status: "error", message: err.message });
-      }
-    }
-
-    if (needsReprovision.length > 0) {
-      // 失敗しても連携全体は成功として返す（アプリ側の一時障害で人事情報の更新まで
-      // 巻き戻すと、次に送り直すまでポータルが古いままになるため）
-      try {
-        await provisionUsers(sql, needsReprovision);
-      } catch (err) {
-        console.warn("[hr-sync] reprovision failed:", err.message);
-      }
-    }
-
-    res.status(200).json({ results });
-  } catch (e) {
-    console.error("[hr-sync]", e);
-    res.status(500).json({ message: "サーバーエラーが発生しました" });
-  }
-};
-```
-
-## ポータル側の他の変更（既存の依頼分）
-
-`jinji` をポータルのアプリとして登録するための変更は README にまとめてある。
-本連携だけなら `api/hr-sync.js` の追加だけで動く（`jinji` のタイル登録とは独立）。
-
-なお Vercel Hobby の「1デプロイ12関数まで」制限があるため、関数数が上限に近い場合は
-既存の `api/user.js` のように**別APIへ統合**する形でもよい
-（例: `api/provision-in.js` にまとめる）。その場合は人事管理側の
-`src/lib/portalPush.ts` の URL も合わせて変更する。
-
-## 動作確認
-
-ポータルへ入れたあと、人事管理の **設定 → ポータル連携** から
-
-1. 「連携内容を確認」で送信内容を点検（部署コードが「未解決」の社員がいないか）
-2. 「ポータルへ連携」で実行
-3. ポータルの管理画面でユーザーの所属・役職が更新されていることを確認
-
-異動申請の発令時にも、その社員だけ自動で連携される。
+- 組織: 新規206件・既存へ紐づけ3件・エラー0。既存部署（D001 等）の `code` と `apps` は不変
+- 社員: 1,685名を発行・承認者1,098名を設定・エラー0（約3.4秒）
+- 2回目は新規0件で人数据え置き（冪等）
+- ポータルの `role` / `can_manage` は連携で変わらない
