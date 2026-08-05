@@ -24,6 +24,46 @@ async function safeDdl(run: () => Promise<unknown>): Promise<void> {
 let schemaReady: Promise<void> | null = null;
 
 /**
+ * スキーマの版。**DDL を1つでも足したり変えたりしたら必ず上げること。**
+ *
+ * 上げ忘れると、新しい列やテーブルが本番に作られないまま
+ * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
+ */
+const SCHEMA_VERSION = 6;
+
+/**
+ * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
+ *
+ * DDL は 90 文ある。CREATE TABLE IF NOT EXISTS は「既にある」なら安いが、
+ * **1文ごとにDBへの往復が発生する**。ローカルDBなら往復1msで誤差だが、
+ * 本番の Neon は HTTP 越しで1往復が数十msあり、サーバーレスのコールドスタートの
+ * たびに 90 往復＝数秒を画面表示の前に払うことになる。
+ * 版を1行読むだけで済ませ、初回とDDL変更時だけ全部を流す。
+ */
+async function schemaUpToDate(): Promise<boolean> {
+  try {
+    const sql = getSql();
+    const rows = await sql`SELECT value FROM jinji_meta WHERE key = 'schema_version' LIMIT 1`;
+    return Number(rows[0]?.value ?? 0) >= SCHEMA_VERSION;
+  } catch {
+    // テーブルがまだ無い（初回）。この後 DDL を流す
+    return false;
+  }
+}
+
+async function recordSchemaVersion(): Promise<void> {
+  const sql = getSql();
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`);
+  await sql`
+    INSERT INTO jinji_meta (key, value) VALUES ('schema_version', ${String(SCHEMA_VERSION)})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+}
+
+/**
  * PF人事管理のドメインテーブルを冪等に作成する。
  *
  * - jinji_admins            … 利用許可名簿（このアプリを使える社員番号）
@@ -54,6 +94,13 @@ export function ensureSchema(): Promise<void> {
 
 async function buildSchema(): Promise<void> {
   const sql = getSql();
+
+  // 作成済みなら DDL は流さない（1往復で済ませる）。
+  // 初期owner の自動登録だけは環境変数を見て毎回試すが、これは1文なので安い。
+  if (await schemaUpToDate()) {
+    await bootstrapAdmins(sql);
+    return;
+  }
 
   await ensureAuthSchema();
   await ensurePasswordResetSchema();
@@ -441,6 +488,10 @@ async function buildSchema(): Promise<void> {
 
   await seedEvaluationItems(sql);
   await bootstrapAdmins(sql);
+
+  // ここまで通ったら版を記録する。以後のコールドスタートは1往復で済む。
+  // 途中で失敗した場合は記録されないので、次回また最初から流れる。
+  await recordSchemaVersion();
 }
 
 /**
