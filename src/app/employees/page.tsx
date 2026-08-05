@@ -68,7 +68,7 @@ export default async function EmployeesPage({
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-[#e5e5e5] bg-white p-4">
         <div className="min-w-[180px] flex-1">
           <label htmlFor="q" className="mb-1 block text-xs font-medium text-[#707070]">
-            検索（社員番号・氏名・カナ・役職）
+            検索（社員番号・氏名・カナ・役職・職務）
           </label>
           <input
             id="q"
@@ -129,13 +129,14 @@ export default async function EmployeesPage({
         />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[840px] text-sm">
             <thead>
               <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
                 <th className="px-4 py-3 font-medium">社員番号</th>
                 <th className="px-4 py-3 font-medium">氏名</th>
                 <th className="px-4 py-3 font-medium">所属</th>
                 <th className="px-4 py-3 font-medium">役職</th>
+                <th className="px-4 py-3 font-medium">職務</th>
                 <th className="px-4 py-3 font-medium">入社日</th>
                 <th className="px-4 py-3 font-medium">年齢</th>
                 <th className="px-4 py-3 font-medium">在籍</th>
@@ -153,6 +154,7 @@ export default async function EmployeesPage({
                   </td>
                   <td className="px-4 py-3 text-[#555555]">{e.orgUnitName ?? "（未配置）"}</td>
                   <td className="px-4 py-3 text-[#555555]">{e.positionName ?? "—"}</td>
+                  <td className="px-4 py-3 text-[#555555]">{e.dutyName ?? "—"}</td>
                   <td className="px-4 py-3 text-[#707070]">{formatDate(e.hireDate)}</td>
                   <td className="px-4 py-3 text-[#707070]">{ageAt(e.birthDate, today) ?? "—"}</td>
                   <td className="px-4 py-3">

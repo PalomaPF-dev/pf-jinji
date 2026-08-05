@@ -5,9 +5,9 @@ import { authOptions } from "@/lib/authOptions";
 export const dynamic = "force-dynamic";
 
 const NEED_MESSAGE: Record<string, string> = {
-  payroll: "基本給与を閲覧する権限がありません。",
-  evaluation: "人事考課を閲覧する権限がありません。",
-  owner: "この画面は人事の責任者（利用許可名簿の管理者）のみが開けます。",
+  payroll: "基本給与は、ポータル管理者のみが扱えます。",
+  evaluation: "人事考課は、ポータル管理者のみが扱えます。",
+  owner: "設定は、ポータル管理者のみが開けます。",
 };
 
 /**
@@ -40,7 +40,7 @@ export default async function ForbiddenPage({
         )}
         <p className="mt-4 text-xs text-[#909090]">
           {need
-            ? "この権限が必要な場合は、人事の責任者に利用許可名簿での付与を依頼してください。"
+            ? "利用が必要な場合は、ポータルでポータル管理者の権限の付与を受けてください。"
             : "利用が必要な場合は、ポータルの管理者に管理者権限の付与を依頼してください。"}
         </p>
         <a
