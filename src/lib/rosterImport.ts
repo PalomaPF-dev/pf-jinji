@@ -1,6 +1,7 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
 import { restructureOrgByName } from "./orgRestructure";
+import { excelDateToIso } from "./xlsx";
 import type { Gender } from "./types";
 
 /**
@@ -25,6 +26,8 @@ const ALIASES: Record<string, string[]> = {
   name: ["ビジネスネーム氏名", "氏名", "名前"],
   nameKana: ["ビジネスネームカナ氏名", "カナ", "カナ氏名", "フリガナ"],
   gender: ["性別"],
+  birthDate: ["生年月日"],
+  hireDate: ["入社年月日", "入社日"],
   employmentType: ["雇用体系名称", "雇用体系", "雇用区分"],
   employmentTypeCode: ["雇用体系"],
   positionName: ["役職名称", "役職"],
@@ -196,6 +199,8 @@ export async function importRoster(
       name,
       nameKana: or("nameKana"),
       gender: genderRaw ? GENDER[genderRaw] ?? null : null,
+      birthDate: excelDateToIso(pick(rec, "birthDate")),
+      hireDate: excelDateToIso(pick(rec, "hireDate")),
       employmentType: or("employmentType"),
       orgUnitId: orgCode ? orgIdByCode.get(orgCode) ?? null : null,
       positionName: or("positionName"),
@@ -227,12 +232,14 @@ export async function importRoster(
     const part = valid.slice(start, start + CHUNK);
     const c = (k: string) => part.map((v) => v[k]);
     try {
-      // 名簿に無い列（生年月日・入社日・連絡先・在籍状態）は DO UPDATE の対象にしない。
+      // 名簿に無い列（連絡先・在籍状態など）は DO UPDATE の対象にしない。
       // 対象にすると、取り込むたびに手入力した情報が消える。
+      // 生年月日・入社日は**値が読めた行だけ** COALESCE で更新する（無ければ既存を残す）。
       // status は INSERT のときだけ 'active' が入り、既存行では触られない。
       const ret = await sql`
         INSERT INTO jinji_employees
-          (employee_no, name, name_kana, gender, employment_type, org_unit_id,
+          (employee_no, name, name_kana, gender, birth_date, hire_date,
+           employment_type, org_unit_id,
            position_name, position_code, duty_name, duty_code, grade, grade_code,
            job_category, job_category_code, job_group, job_group_code,
            pay_class, pay_class_code, employee_class, employee_class_code,
@@ -240,7 +247,8 @@ export async function importRoster(
            payroll_org_code, payroll_org_name, account_org_code, account_org_name, status)
         SELECT *, 'active' FROM unnest(
           ${c("employeeNo")}::text[], ${c("name")}::text[], ${c("nameKana")}::text[],
-          ${c("gender")}::text[], ${c("employmentType")}::text[], ${c("orgUnitId")}::uuid[],
+          ${c("gender")}::text[], ${c("birthDate")}::date[], ${c("hireDate")}::date[],
+          ${c("employmentType")}::text[], ${c("orgUnitId")}::uuid[],
           ${c("positionName")}::text[], ${c("positionCode")}::text[],
           ${c("dutyName")}::text[], ${c("dutyCode")}::text[],
           ${c("grade")}::text[], ${c("gradeCode")}::text[],
@@ -256,6 +264,8 @@ export async function importRoster(
           name                = EXCLUDED.name,
           name_kana           = COALESCE(EXCLUDED.name_kana, jinji_employees.name_kana),
           gender              = COALESCE(EXCLUDED.gender, jinji_employees.gender),
+          birth_date          = COALESCE(EXCLUDED.birth_date, jinji_employees.birth_date),
+          hire_date           = COALESCE(EXCLUDED.hire_date, jinji_employees.hire_date),
           employment_type     = COALESCE(EXCLUDED.employment_type, jinji_employees.employment_type),
           org_unit_id         = COALESCE(EXCLUDED.org_unit_id, jinji_employees.org_unit_id),
           position_name       = EXCLUDED.position_name,
@@ -301,6 +311,115 @@ export async function importRoster(
     result.errors.push({ row: 0, employeeNo: "-", message: `階層の自動整理に失敗: ${(e as Error).message}` });
   }
 
+  return result;
+}
+
+/**
+ * 「社員番号＋生年月日・入社年月日」だけのファイル（ポータルの権限マスタなど）か。
+ * 名簿（所属組織コードを持つ）は名簿の経路へ流すので、ここでは除く。
+ */
+export function looksLikeDatesSheet(headers: string[]): boolean {
+  const set = new Set(headers.map((h) => h.replace(/[\s　]+/g, "")));
+  const hasNo = ALIASES.employeeNo.some((a) => set.has(a));
+  const hasDate = [...ALIASES.birthDate, ...ALIASES.hireDate].some((a) => set.has(a));
+  return hasNo && hasDate && !looksLikeRoster(headers);
+}
+
+export interface DatesImportResult {
+  /** ファイルにいた社員数（重複を除く） */
+  total: number;
+  /** 生年月日・入社日を書き込んだ人数 */
+  updated: number;
+  /** すでに同じ値が入っていた人数 */
+  unchanged: number;
+  /** 台帳に居ない社員番号 */
+  missing: string[];
+  errors: { row: number; employeeNo: string; message: string }[];
+}
+
+/**
+ * 生年月日・入社日**だけ**を既存の社員へ補完する。
+ *
+ * 権限マスタは全社員が載っているわけでも、名簿と同じ列を持つわけでもないので、
+ * この経路では**社員を作らない・組織を触らない・日付以外を書かない**。
+ * 値が読めた列だけを更新し、ファイル側が空の列は既存の値を残す。
+ */
+export async function importEmployeeDates(
+  records: Record<string, string>[],
+): Promise<DatesImportResult> {
+  await ensureSchema();
+  const sql = getSql();
+
+  const result: DatesImportResult = { total: 0, updated: 0, unchanged: 0, missing: [], errors: [] };
+
+  // 同じ社員が複数行に出ることがある（職場ごとの権限行など）。日付が読めた最初の行を採る。
+  const byNo = new Map<string, { rowNo: number; birth: string | null; hire: string | null }>();
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
+    const employeeNo = pick(rec, "employeeNo");
+    if (!employeeNo) continue;
+    const birth = excelDateToIso(pick(rec, "birthDate"));
+    const hire = excelDateToIso(pick(rec, "hireDate"));
+    const prev = byNo.get(employeeNo);
+    if (!prev) {
+      byNo.set(employeeNo, { rowNo: i + 2, birth, hire });
+    } else {
+      prev.birth = prev.birth ?? birth;
+      prev.hire = prev.hire ?? hire;
+    }
+  }
+  result.total = byNo.size;
+
+  const entries = [...byNo.entries()].filter(([no, v]) => {
+    if (v.birth || v.hire) return true;
+    const raw = records[v.rowNo - 2];
+    const has = pick(raw, "birthDate") || pick(raw, "hireDate");
+    if (has) {
+      result.errors.push({ row: v.rowNo, employeeNo: no, message: "日付を読み取れませんでした。" });
+    }
+    return false;
+  });
+  if (entries.length === 0) return result;
+
+  const existing = await sql`
+    SELECT employee_no FROM jinji_employees
+    WHERE employee_no = ANY(${entries.map(([no]) => no)}::text[])`;
+  const known = new Set(existing.map((r) => r.employee_no as string));
+  const target = entries.filter(([no]) => {
+    if (known.has(no)) return true;
+    result.missing.push(no);
+    return false;
+  });
+
+  const CHUNK = 500;
+  for (let start = 0; start < target.length; start += CHUNK) {
+    const part = target.slice(start, start + CHUNK);
+    try {
+      // 値が変わる行だけを UPDATE し、何人に書いたかを数える
+      const ret = await sql`
+        UPDATE jinji_employees e
+        SET birth_date = COALESCE(v.birth, e.birth_date),
+            hire_date  = COALESCE(v.hire, e.hire_date),
+            updated_at = NOW()
+        FROM unnest(
+          ${part.map(([no]) => no)}::text[],
+          ${part.map(([, v]) => v.birth)}::date[],
+          ${part.map(([, v]) => v.hire)}::date[]
+        ) AS v(no, birth, hire)
+        WHERE e.employee_no = v.no
+          AND (COALESCE(v.birth, e.birth_date) IS DISTINCT FROM e.birth_date
+            OR COALESCE(v.hire,  e.hire_date)  IS DISTINCT FROM e.hire_date)
+        RETURNING e.employee_no`;
+      result.updated += ret.length;
+      result.unchanged += part.length - ret.length;
+    } catch (e) {
+      result.errors.push({
+        row: 0,
+        employeeNo: `${part[0][0]}〜${part[part.length - 1][0]}`,
+        message: `${part.length} 件の更新に失敗しました: ${(e as Error).message}`,
+      });
+    }
+  }
   return result;
 }
 

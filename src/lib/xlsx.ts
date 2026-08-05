@@ -214,6 +214,38 @@ export function readXlsx(buf: Buffer): XlsxSheet[] {
 }
 
 /**
+ * Excel のセル値を "YYYY-MM-DD" にする。読めなければ null。
+ *
+ * Excel の日付は**シリアル値**（1899-12-30 からの日数。例: 27850 → 1976-04-01）で
+ * 入っていることが多く、本リーダーは書式を見ないため数値のまま出てくる。
+ * 生年月日・入社日の取込ではこの変換が必須になる。
+ * 文字列の日付（1976/4/1・1976-04-01・1976年4月1日）も受ける。
+ */
+export function excelDateToIso(v: string | undefined): string | null {
+  const s = (v ?? "").trim();
+  if (!s) return null;
+
+  const m = s.match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})日?$/);
+  if (m) {
+    const [mo, d] = [Number(m[2]), Number(m[3])];
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+      return `${m[1]}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+    return null;
+  }
+
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Math.floor(Number(s));
+    // 1902年〜2173年ごろ。西暦4桁（"1976"）や社員番号をうっかり日付にしない下限、
+    // 遠すぎる未来を弾く上限。
+    if (n >= 1000 && n < 100000) {
+      return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+    }
+  }
+  return null;
+}
+
+/**
  * 1行目をヘッダとみなして、各行を { 見出し: 値 } に変換する。
  * 見出しの前後空白と全角空白は落として突き合わせやすくする。
  */

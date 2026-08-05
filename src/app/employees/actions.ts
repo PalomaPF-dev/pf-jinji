@@ -6,7 +6,12 @@ import { assertJinjiSession } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
 import { parseCsvObjects } from "@/lib/csv";
 import { readXlsx, sheetToObjects } from "@/lib/xlsx";
-import { importRoster, looksLikeRoster } from "@/lib/rosterImport";
+import {
+  importEmployeeDates,
+  importRoster,
+  looksLikeDatesSheet,
+  looksLikeRoster,
+} from "@/lib/rosterImport";
 import {
   createEmployee,
   deleteEmployee,
@@ -183,8 +188,14 @@ export async function importEmployeesAction(_prev: ActionState, form: FormData):
     if (isXlsx) {
       const sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
       const sheet = (wantSheet && sheets.find((x) => x.name === wantSheet)) || sheets[0];
-      headers = (sheet.rows[0] ?? []).map((h) => h.replace(/[\s　]+/g, ""));
-      records = sheetToObjects(sheet);
+      // 見出しが1行目とは限らない（権限マスタは1行目が空で2行目が見出し）。
+      // 先頭10行から「社員番号」を含む行を探し、それより上は捨てる。
+      const headerAt = sheet.rows
+        .slice(0, 10)
+        .findIndex((r) => r.some((c) => (c ?? "").replace(/[\s　]+/g, "") === "社員番号"));
+      const rows = headerAt > 0 ? sheet.rows.slice(headerAt) : sheet.rows;
+      headers = (rows[0] ?? []).map((h) => h.replace(/[\s　]+/g, ""));
+      records = sheetToObjects({ name: sheet.name, rows });
     } else {
       const text = await file.text();
       records = parseCsvObjects(text);
@@ -221,6 +232,33 @@ export async function importEmployeesAction(_prev: ActionState, form: FormData):
     return {
       message: `名簿を取り込みました（${parts.join(" / ")}）`,
       importResult: { created: result.created, updated: result.updated, errors: result.errors },
+    };
+  }
+
+  // 社員番号＋生年月日・入社年月日のファイル（権限マスタ等）→ 日付だけ補完する
+  if (looksLikeDatesSheet(headers)) {
+    const result = await importEmployeeDates(records);
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_employee",
+      targetType: "employee",
+      targetLabel: "生年月日・入社日の取込",
+      detail: {
+        total: result.total,
+        updated: result.updated,
+        unchanged: result.unchanged,
+        missingCount: result.missing.length,
+        errorCount: result.errors.length,
+      },
+    });
+    revalidatePath("/employees");
+    const parts = [`更新 ${result.updated} 名`, `変更なし ${result.unchanged} 名`];
+    if (result.missing.length) parts.push(`台帳に居ない ${result.missing.length} 名`);
+    if (result.errors.length) parts.push(`エラー ${result.errors.length} 件`);
+    return {
+      message: `生年月日・入社日を取り込みました（${parts.join(" / ")}）`,
+      importResult: { created: 0, updated: result.updated, errors: result.errors },
     };
   }
 
