@@ -69,32 +69,36 @@ export interface OrgChartData {
 }
 
 /**
- * 役職の序列。組織図の枠の中では役職が上の人から並べる。
+ * 役職・職務の序列。組織図の枠の中では上位の人から並べる。
  * 名称は「工場長A」「課長心得」のように接尾辞が付くため、部分一致で判定する。
- * どれにも当てはまらない役職（一般・その他・空欄）は末尾。
+ * どれにも当てはまらないもの（一般・その他・空欄）は末尾。
  */
 // 「工場長」より「工場長代理」を先に検査する必要があるが、序列は 長 > 代理。
 // 検査順（配列の並び）と序列（rank）を分けて持つ。
+// 番号は間を空けてある（役職と職務の両方をこの表で測るため、後から挟めるように）。
 const POSITION_RANKS: { re: RegExp; rank: number }[] = [
-  { re: /本部長/, rank: 0 },
-  { re: /副工場長/, rank: 2 },
-  { re: /工場長代理/, rank: 3 },
-  { re: /工場長付/, rank: 4 },
-  { re: /工場長/, rank: 1 },
-  { re: /部長代理/, rank: 6 },
-  { re: /部長/, rank: 5 },
-  { re: /次長/, rank: 7 },
-  { re: /センター長|ｾﾝﾀｰ長/, rank: 8 },
-  { re: /室長/, rank: 9 },
-  { re: /課長代理/, rank: 11 },
-  { re: /課長心得/, rank: 12 },
-  { re: /課長/, rank: 10 },
-  { re: /グループ長|ｸﾞﾙｰﾌﾟ長/, rank: 13 },
-  { re: /係長心得/, rank: 15 },
-  { re: /係長/, rank: 14 },
-  { re: /班長/, rank: 16 },
-  { re: /主任代理/, rank: 18 },
-  { re: /主任/, rank: 17 },
+  { re: /常務取締役/, rank: 0 },
+  { re: /取締役/, rank: 1 },
+  { re: /本部長|部門長/, rank: 2 },
+  { re: /副工場長/, rank: 12 },
+  { re: /工場長代理/, rank: 13 },
+  { re: /工場長付/, rank: 14 },
+  { re: /工場長/, rank: 10 },
+  { re: /部長代理/, rank: 21 },
+  { re: /部長/, rank: 20 },
+  { re: /次長/, rank: 25 },
+  { re: /センター長|ｾﾝﾀｰ長/, rank: 30 },
+  { re: /室長/, rank: 35 },
+  { re: /課長代理/, rank: 41 },
+  { re: /課長心得/, rank: 42 },
+  { re: /課長/, rank: 40 },
+  { re: /マネージャー|ﾏﾈｰｼﾞｬｰ/, rank: 45 },
+  { re: /グループ長|ｸﾞﾙｰﾌﾟ長/, rank: 50 },
+  { re: /係長心得/, rank: 56 },
+  { re: /係長/, rank: 55 },
+  { re: /班長/, rank: 60 },
+  { re: /主任代理/, rank: 66 },
+  { re: /主任/, rank: 65 },
 ];
 
 /** 役職の序列（小さいほど上位）。該当なしは末尾。 */
@@ -105,6 +109,27 @@ export function positionRank(positionName: string | null): number {
     if (re.test(p)) return rank;
   }
   return 99;
+}
+
+/**
+ * 職務の序列（小さいほど上位）。役職より先に効く。
+ *
+ * 職場を実際に率いているのは職務の「グループ長」「室長」「工場長」であって、
+ * 役職（一般・主任・係長…）ではない。そのため枠の先頭は職務で決める。
+ *
+ * ただし職務欄には「安全推進工場長室」（所属を表すだけ）「品質管理推進責任者」
+ * 「温水多工程3級」のような**役職名でないもの**も入る。長で終わる肩書き
+ * （＋マネージャー）だけを役職とみなし、それ以外は末尾に置く。
+ */
+const DUTY_TITLE_RE = /(長|長代理|長心得|長付|マネージャー|ﾏﾈｰｼﾞｬｰ)$/;
+
+export function dutyRank(dutyName: string | null): number {
+  let d = (dutyName ?? "").trim();
+  if (!d) return 99;
+  d = d.replace(/[（(][^）)]*[）)]$/, "").trim(); // 「グループ長（工場）」→「グループ長」
+  d = d.replace(/[ 　]*[A-ZＡ-Ｚ]$/, "").trim(); // 「工場長A」→「工場長」
+  if (!DUTY_TITLE_RE.test(d)) return 99;
+  return positionRank(d);
 }
 
 /** 親の枠へ統合する組織か（「大口工場長」「大口工場長代理」「同名の部」など）。 */
@@ -159,19 +184,25 @@ export async function buildOrgChart(
 
   // 「親の長」の枠を親へ畳む。畳んだ組織の子は親の子として続きに並べる。
   const mergeInto = (node: ChartNode) => {
-    let rank = 0;
+    const merged: ChartNode[] = [];
     const nextChildren: ChartNode[] = [];
     const queue = [...node.children];
     while (queue.length > 0) {
       const c = queue.shift()!;
       if (mergesIntoParent(node.orgUnitName, c.orgUnitName)) {
-        hostByUnitId.set(c.orgUnitId, node);
-        unitRank.set(c.orgUnitId, rank++);
+        merged.push(c);
         // 畳んだ組織の配下（もし居れば）は親の子として扱う
         queue.unshift(...c.children);
       } else {
         nextChildren.push(c);
       }
+    }
+    // 「大口工場長」→「大口工場長代理」→「大口工場長付」の順に並べる
+    merged.sort((a, b) => positionRank(a.orgUnitName) - positionRank(b.orgUnitName));
+    let rank = 0;
+    for (const c of merged) {
+      hostByUnitId.set(c.orgUnitId, node);
+      unitRank.set(c.orgUnitId, rank++);
     }
     unitRank.set(node.orgUnitId, rank);
     node.children = nextChildren;
@@ -288,16 +319,15 @@ export async function buildOrgChart(
     host.people.push(person);
   }
 
-  // 枠の中の並び: 長（統合分）→ 自組織、その中では役職の序列の上から。同順位はカナ順のまま。
-  // ただし**グループ長は役職の序列に関わらず職場の一番上**（職場の長という運用のため）。
-  // グループ長は役職ではなく職務（「グループ長（工場）」等）に入っているので、両方を見る。
-  const isGroupLeader = (p: ChartPerson) =>
-    /グループ長|ｸﾞﾙｰﾌﾟ長/.test(`${p.positionName ?? ""} ${p.dutyName ?? ""}`);
+  // 枠の中の並び: 長（統合分）→ 自組織、その中では
+  //   1. 職務の序列（グループ長・室長…）— 職場を率いているのは職務なので最優先
+  //   2. 役職の序列（部長・課長・係長…）
+  // 同順位はカナ順のまま。
   const sortPeople = (node: ChartNode) => {
     node.people.sort(
       (a, b) =>
         (unitRank.get(a.orgUnitId) ?? 99) - (unitRank.get(b.orgUnitId) ?? 99) ||
-        (isGroupLeader(b) ? 1 : 0) - (isGroupLeader(a) ? 1 : 0) ||
+        dutyRank(a.dutyName) - dutyRank(b.dutyName) ||
         positionRank(a.positionName) - positionRank(b.positionName),
     );
     for (const c of node.children) sortPeople(c);
