@@ -90,7 +90,8 @@ export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   const isOwnerRoster = Boolean(r.is_owner);
   if (!isPortalAdmin && !isManager && !isOwnerRoster) return null;
 
-  // 給与・考課・設定は「管理」扱い。ポータル管理者（と名簿の責任者）だけに開く。
+  // 給与・考課・設定はナビの「ポータル管理者のみ」。
+  // ポータル管理者（と名簿の責任者）だけに開き、can_manage の管理者には見せない。
   const full = isPortalAdmin || isOwnerRoster;
   return {
     loginId,
