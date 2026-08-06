@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { assertOwnerSession } from "@/lib/session";
 import { clearAuditLogs, recordAudit } from "@/lib/audit";
+import { resetHrData } from "@/lib/reset";
 import { formValues, type FormValues } from "@/lib/formState";
 import {
   assertNotLastOwner,
@@ -153,6 +154,48 @@ export async function clearAuditLogsAction(): Promise<SettingsActionState> {
     });
     revalidatePath("/settings");
     return { message: `監査ログ ${removed} 件を削除しました。` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+
+/**
+ * 人事データの初期化。名簿を取り込み直すときに使う。
+ *
+ * 取り消せないので、確認の言葉（「削除する」）を打ってもらってから実行する。
+ * 利用許可名簿・各種マスター・監査ログは残す（消すとアプリに入れなくなる・
+ * 誰が初期化したか分からなくなる）。
+ */
+export async function resetHrDataAction(
+  _prev: SettingsActionState,
+  form: FormData,
+): Promise<SettingsActionState> {
+  const s = await assertOwnerSession();
+  if (str(form, "confirm") !== "削除する") {
+    return { error: "確認のため、入力欄に「削除する」と入力してください。" };
+  }
+  try {
+    const r = await resetHrData();
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_admin",
+      targetType: "reset",
+      targetLabel: "人事データを初期化",
+      detail: { ...r },
+    });
+    revalidatePath("/");
+    revalidatePath("/employees");
+    revalidatePath("/org");
+    revalidatePath("/settings");
+    return {
+      message:
+        `初期化しました。社員 ${r.employees} 件・組織 ${r.orgUnits} 件` +
+        `（異動申請 ${r.transfers} / 継続雇用 ${r.reemployments} / 考課 ${r.evaluations} / ` +
+        `給与 ${r.salaries} / 資格 ${r.qualifications} / 異動案 ${r.plans}）を削除しました。` +
+        `社員台帳の取込から入れ直してください。`,
+    };
   } catch (e) {
     return { error: (e as Error).message };
   }

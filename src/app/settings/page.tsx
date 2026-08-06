@@ -5,6 +5,8 @@ import { listAdmins } from "@/lib/admins";
 import { listQualificationMasters } from "@/lib/qualifications";
 import { listEvaluationItems } from "@/lib/evaluations";
 import { listAuditLogs } from "@/lib/audit";
+import { countByStatus } from "@/lib/employees";
+import { listOrgUnits } from "@/lib/org";
 import { formatDateTime } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
 import PortalSyncForm, { RestructureForm } from "@/components/PortalSyncForm";
@@ -12,6 +14,7 @@ import AdminUpsertForm, {
   ClearAuditLogsForm,
   IssueLinkForm,
   RemoveAdminForm,
+  ResetHrDataForm,
 } from "@/components/AdminForms";
 import QualificationMasterForm, {
   DeleteQualificationMasterForm,
@@ -30,12 +33,17 @@ export default async function SettingsPage({
   const s = await requireOwnerSession();
   const { edit } = await searchParams;
 
-  const [admins, masters, items, logs] = await Promise.all([
+  const [admins, masters, items, logs, statusCounts, orgUnits] = await Promise.all([
     listAdmins(),
     listQualificationMasters(false),
     listEvaluationItems(false),
     listAuditLogs(100),
+    countByStatus(),
+    listOrgUnits(),
   ]);
+  // 初期化ボタンに「いま何件消えるか」を出す
+  const employeeCount = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+  const orgUnitCount = orgUnits.length;
   const editing = edit ? admins.find((a) => a.loginId === edit) : undefined;
 
   return (
@@ -177,6 +185,7 @@ export default async function SettingsPage({
           <h2 className="text-base font-bold text-[#333333]">組織の取込・整理</h2>
           <PortalSyncForm />
           <RestructureForm />
+          <ResetHrDataForm employees={employeeCount} orgUnits={orgUnitCount} />
         </section>
 
         {/* ===== 監査ログ ===== */}
