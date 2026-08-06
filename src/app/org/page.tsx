@@ -70,6 +70,14 @@ export default async function OrgPage({
     d.children.forEach(walk);
     return { dept: d, items };
   });
+  // 絞り込む前の深さで「まだ平らか」を見る（絞り込むと浅くなるのは当たり前のため）。
+  // 判定は組織を整理できる人（ポータル管理者）にだけ出す。
+  const needsRestructure =
+    Boolean(board) &&
+    board!.maxDepth <= 1 &&
+    board!.roots.length > 0 &&
+    scope.orgUnitIds === null;
+
   if (board && wp) board = sliceChart(board, wp);
   else if (board && dept) board = sliceChart(board, dept);
 
@@ -206,6 +214,20 @@ export default async function OrgPage({
       ) : asBoard && board ? (
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-4">
           <>
+          {/*
+            配置表は組織の親子関係をそのまま列にしている。名簿を取り込んだだけの状態は
+            「本部 → 職場」の2階層しかなく、第3・第4階層の列が出ない。
+            そのときだけ、階層を組む場所へ案内する（見て分からず詰まるため）。
+          */}
+          {needsRestructure && (
+            <p className="no-print mb-3 rounded-lg border border-[#f0e2c8] bg-[#fdfaf3] px-3 py-2 text-xs text-[#a06a12]">
+              いまは<strong>2階層</strong>（本部 → 職場）のままです。
+              <Link href="/settings" className="mx-1 font-medium text-[#2563eb] hover:underline">
+                設定 →「階層の自動整理」
+              </Link>
+              を1回実行すると、本部 → 部・工場 → 室・共通・総務 → それ以外の職場 の4階層になります。
+            </p>
+          )}
           {orgEdit && (
             <p className="no-print mb-3 rounded-lg border border-[#c8d8f5] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
               枠の見出しの「編集」を押すと、その場で<strong>組織名・部署コード・職場コード・区分・組織の長・上位組織</strong>を

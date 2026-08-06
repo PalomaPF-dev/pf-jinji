@@ -54,14 +54,15 @@ function RestructureButton() {
       className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5] disabled:opacity-50"
     >
       <Network className={`h-4 w-4 ${pending ? "animate-pulse" : ""}`} />
-      {pending ? "整理中…" : "名称から階層を組む"}
+      {pending ? "整理中…" : "4階層に組み直す"}
     </button>
   );
 }
 
 /**
- * 名称の規則（先頭の語が「〜工場」「〜部」）から中間層を組み、
- * 本部 → 工場/部 → 職場/室 の階層にする。名簿取込のたびにも自動で走る。
+ * 所属組織コード（8桁）の上位4桁から中間層を組み、
+ * 本部 → 部・工場 → 室・共通・総務 → それ以外の職場 の4階層にする。
+ * 名簿取込のたびにも自動で走る。
  */
 export function RestructureForm() {
   const [state, formAction] = useActionState(restructureOrgAction, {} as OrgActionState);
@@ -69,10 +70,29 @@ export function RestructureForm() {
     <form action={formAction} className="rounded-xl border border-[#e5e5e5] bg-white p-5">
       <h2 className="mb-1 text-sm font-bold text-[#333333]">階層の自動整理</h2>
       <p className="mb-3 text-xs text-[#707070]">
-        組織名称の先頭（「大口工場 ﾌﾟﾚｽ1」「生産管理部 生産企画室」など）から、
-        本部 → <strong>工場・部</strong> → <strong>職場・室</strong> の階層を組みます。
-        名簿の取込時にも自動で実行されます。規則に一致しない組織（EHS統括室・配送センター等）は
-        本部直下のまま動かしません。
+        名簿は「本部 → 所属組織」の2階層しか持っていないので、所属組織コード（8桁）の
+        上位4桁から中間層を組み、組織図を次の4階層にします。
+      </p>
+      <ul className="mb-3 space-y-0.5 text-xs text-[#707070]">
+        <li>
+          第1階層 <span className="text-[#909090]">本部</span>
+        </li>
+        <li>
+          第2階層 <strong>部・工場</strong>{" "}
+          <span className="text-[#909090]">大口工場 / 調達部 / ロジスティクス部 …</span>
+        </li>
+        <li>
+          第3階層 <strong>室・共通・総務</strong>{" "}
+          <span className="text-[#909090]">大口安全推進工場長室 / 大口組立共通 / 調達室 …</span>
+        </li>
+        <li>
+          第4階層 <strong>それ以外の職場</strong>{" "}
+          <span className="text-[#909090]">大口ﾌﾟﾚｽ1 / 大口品質管理 / 大江配送センター …</span>
+        </li>
+      </ul>
+      <p className="mb-3 text-xs text-[#707070]">
+        名簿の取込時にも自動で実行されます。何度押しても同じ形になります。
+        <strong>取込より前に配置表で組み替えた階層は、この規則で上書きされます。</strong>
       </p>
       <RestructureButton />
       {state.error && (
