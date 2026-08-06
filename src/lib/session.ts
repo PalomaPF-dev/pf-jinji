@@ -14,7 +14,8 @@ import type { JinjiGrant } from "./types";
  *
  * ポータルの権限と機能の対応:
  *   - ポータル管理者（users.role = 'admin'）
- *       … 全機能。基本給与・人事考課・設定（管理グループ）はこの人だけ。
+ *       … 全機能。基本給与・人事考課・設定はこの人だけで、
+ *         ナビの見出し「ポータル管理者のみ」もこの人にしか出さない。
  *   - ポータルの管理者権限（users.can_manage）
  *       … その他の機能（社員台帳・組織図・異動申請・継続雇用・資格）。
  *
@@ -22,9 +23,10 @@ import type { JinjiGrant } from "./types";
  * 判定は JWT に載せず **毎回 DB から引く**。ポータルで管理者を外した瞬間に、手元に
  * 残っているセッションでも即座に効かせるため（ポータルの requireManageSession と同じ思想）。
  *
- * jinji_admins 名簿は**責任者（is_owner）の逃げ道**としてだけ残す。ポータルの権限が
- * 同期されない状態（ポータル障害・開発環境）でも、名簿の責任者は入室でき全機能を使える。
- * これが無いと、ポータル側の設定ひとつで誰もアプリを管理できない状態に陥る。
+ * jinji_admins 名簿は**入室の逃げ道**としてだけ残す。ポータルの権限が同期されない状態
+ * （ポータル障害・開発環境）でも、名簿の責任者はアプリに入って社員台帳・組織図・
+ * 申請書は扱える。ただし人事考課・基本給与・設定は開けない。人事情報の中でも
+ * 最も機微なこの3つは、ポータル管理者かどうかだけで決める（名簿では開けない）。
  * （名簿の can_payroll / can_evaluation はこの整理で廃止。列は残るが判定には使わない）
  */
 
@@ -67,9 +69,10 @@ async function baseSession() {
  * 入室可否と権限を1回のDBアクセスで決める。使えないなら null。
  *
  * 入室できるのは次のいずれか。
- *   - ポータル管理者（users.role = 'admin'）… 全機能
- *   - ポータルの管理者権限（users.can_manage）… 給与・考課・設定を除く機能
- *   - 人事の責任者（jinji_admins.is_owner）… ポータルに依存しない逃げ道。全機能
+ *   - ポータル管理者（users.role = 'admin'）… 全機能（考課・給与・設定を含む）
+ *   - ポータルの管理者権限（users.can_manage）… 考課・給与・設定を除く機能
+ *   - 人事の責任者（jinji_admins.is_owner）… ポータルに依存しない入室の逃げ道。
+ *     ただし人事考課・基本給与・設定は開けない（ポータル管理者だけのため）
  */
 export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   if (!loginId) return null;
@@ -90,16 +93,16 @@ export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   const isOwnerRoster = Boolean(r.is_owner);
   if (!isPortalAdmin && !isManager && !isOwnerRoster) return null;
 
-  // 給与・考課・設定はナビの「ポータル管理者のみ」。
-  // ポータル管理者（と名簿の責任者）だけに開き、can_manage の管理者には見せない。
-  const full = isPortalAdmin || isOwnerRoster;
+  // 人事考課・基本給与・設定は**ポータル管理者（role='admin'）だけ**のもの。
+  // 見出しの「ポータル管理者のみ」ごと、それ以外の人には一切表示しない。
+  // 名簿の責任者（is_owner）は入室の逃げ道であって、この3つは開けない。
   return {
     loginId,
     name: (r.admin_name as string | null) ?? loginId,
     isPortalAdmin,
-    isOwner: full,
-    canPayroll: full,
-    canEvaluation: full,
+    isOwner: isPortalAdmin,
+    canPayroll: isPortalAdmin,
+    canEvaluation: isPortalAdmin,
   };
 }
 

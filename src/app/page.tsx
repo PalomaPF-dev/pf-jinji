@@ -45,7 +45,7 @@ function Stat({
 
 /** ダッシュボード。今なにをすべきかが一目で分かることを目的にしている。 */
 export default async function HomePage() {
-  // 名簿が空＝人事の責任者がまだ居ない。給与・考課の許可を出せる人が要るので
+  // 名簿が空＝ポータルの権限が届かないときの入室の逃げ道がまだ無い。
   // 初期セットアップへ誘導する（入室自体はポータルの管理者権限で通っている）。
   try {
     if (await isUnconfigured()) redirect("/setup");

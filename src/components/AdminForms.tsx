@@ -47,7 +47,7 @@ export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
       </h2>
       <p className="mb-4 text-xs text-[#707070]">
         通常のアクセス可否はポータルの権限で決まります。この名簿は、ポータルの権限が
-        届かない状態でもアプリを管理できる<strong>責任者の控え</strong>です。
+        届かない状態でもアプリに入れる<strong>入室の控え</strong>です。
         既にいる社員番号を入れると更新になります。
       </p>
 
@@ -91,7 +91,8 @@ export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
           <span>
             責任者（owner）
             <span className="block text-xs text-[#909090]">
-              ポータルの権限に関わらず入室でき、給与・考課・設定を含む全機能を扱えます。
+              ポータルの権限に関わらず入室できます。ただし人事考課・基本給与・設定は
+            ポータル管理者だけのもので、名簿では開けません。
             </span>
           </span>
         </label>
