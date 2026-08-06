@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutGrid, Settings2 } from "lucide-react";
+import { Hash, LayoutGrid, Settings2 } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
 import { loadOrgChart } from "@/lib/org";
@@ -87,6 +87,13 @@ export default async function OrgPage({
                 >
                   <LayoutGrid className="h-4 w-4" />
                   異動案
+                </Link>
+                <Link
+                  href="/org/codes"
+                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
+                >
+                  <Hash className="h-4 w-4" />
+                  部署・職場コード
                 </Link>
                 <Link
                   href="/org/edit"
