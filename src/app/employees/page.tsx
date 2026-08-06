@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Download, Plus, Upload } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
-import { listEmployees, normalizeEmployeeSort, type EmployeeSortKey } from "@/lib/employees";
+import { listEmployeesPage, normalizeEmployeeSort, type EmployeeSortKey } from "@/lib/employees";
 import { activeOn, buildOrgTree, flattenTree, listOrgUnits, memberCountsByOrg } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
 import { ageAt, formatDate } from "@/lib/format";
@@ -46,6 +46,61 @@ function SortTh({
   );
 }
 
+/**
+ * ページ送り。1,600名を一度に描くとHTMLが数MBになって表示が重いので、
+ * 100名ずつに切って出す。検索・所属・在籍・並び順はそのまま持ち回る。
+ */
+function Pager({
+  page,
+  pages,
+  params,
+}: {
+  page: number;
+  pages: number;
+  params: Record<string, string>;
+}) {
+  if (pages <= 1) return null;
+  const href = (p: number) => `/employees?${new URLSearchParams({ ...params, page: String(p) })}`;
+  // 先頭・末尾・現在の前後2ページだけ出す（100ページ並ぶと押せないため）
+  const nums: number[] = [];
+  for (let i = 1; i <= pages; i++) {
+    if (i === 1 || i === pages || Math.abs(i - page) <= 2) nums.push(i);
+  }
+  const box = "rounded-lg border border-[#e5e5e5] px-3 py-1.5 text-sm";
+  return (
+    <nav aria-label="ページ送り" className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+      {page > 1 ? (
+        <Link href={href(page - 1)} className={`${box} text-[#555555] hover:bg-[#f7f7f5]`}>
+          前へ
+        </Link>
+      ) : (
+        <span className={`${box} text-[#c8c8c8]`}>前へ</span>
+      )}
+      {nums.map((n, i) => (
+        <span key={n} className="flex items-center gap-1.5">
+          {i > 0 && n - nums[i - 1] > 1 && <span className="px-1 text-xs text-[#c8c8c8]">…</span>}
+          {n === page ? (
+            <span aria-current="page" className={`${box} border-[#2563eb] bg-[#2563eb] font-medium text-white`}>
+              {n}
+            </span>
+          ) : (
+            <Link href={href(n)} className={`${box} text-[#555555] hover:bg-[#f7f7f5]`}>
+              {n}
+            </Link>
+          )}
+        </span>
+      ))}
+      {page < pages ? (
+        <Link href={href(page + 1)} className={`${box} text-[#555555] hover:bg-[#f7f7f5]`}>
+          次へ
+        </Link>
+      ) : (
+        <span className={`${box} text-[#c8c8c8]`}>次へ</span>
+      )}
+    </nav>
+  );
+}
+
 /** 社員台帳の一覧。検索・所属・在籍状態で絞り込む。 */
 export default async function EmployeesPage({
   searchParams,
@@ -56,28 +111,39 @@ export default async function EmployeesPage({
     status?: string;
     sort?: string;
     desc?: string;
+    page?: string;
   }>;
 }) {
   const s = await requireJinjiSession();
   const scope = await getScope(s.grant);
-  const { q = "", org = "", status = "active", sort: sortRaw, desc: descRaw } = await searchParams;
+  const {
+    q = "",
+    org = "",
+    status = "active",
+    sort: sortRaw,
+    desc: descRaw,
+    page: pageRaw,
+  } = await searchParams;
   const today = todayJST();
   const sort = normalizeEmployeeSort(sortRaw);
   const desc = descRaw === "1";
+  // 並び替え・絞り込みを変えたら1ページ目に戻す（page は引き継がない）
   const sortProps = { sort, desc, params: { q, org, status } };
 
-  const [employees, orgUnits, counts] = await Promise.all([
-    listEmployees({
+  const [list, orgUnits, counts] = await Promise.all([
+    listEmployeesPage({
       q,
       orgUnitId: org || null,
       status: (status === "all" ? "all" : status) as EmploymentStatus | "all",
       scopeOrgIds: scope.orgUnitIds,
       sort,
       desc,
+      page: Number(pageRaw) || 1,
     }),
     listOrgUnits(),
     memberCountsByOrg(),
   ]);
+  const employees = list.items;
   const orgOptions = flattenTree(buildOrgTree(activeOn(orgUnits, today), counts, new Map())).filter(
     (o) => scope.orgUnitIds === null || scope.orgUnitIds.includes(o.id),
   );
@@ -87,7 +153,10 @@ export default async function EmployeesPage({
       <PageHeader
         title="社員台帳"
         description={
-          scope.scopeName ? `${scope.scopeName} の ${employees.length} 件` : `${employees.length} 件`
+          [
+            scope.scopeName ? `${scope.scopeName} の ${list.total} 件` : `${list.total} 件`,
+            list.pages > 1 ? `（${list.page} / ${list.pages} ページ）` : "",
+          ].join("")
         }
         actions={
           <>
@@ -227,6 +296,12 @@ export default async function EmployeesPage({
           </table>
         </div>
       )}
+
+      <Pager
+        page={list.page}
+        pages={list.pages}
+        params={{ q, org, status, sort, ...(desc ? { desc: "1" } : {}) }}
+      />
     </div>
   );
 }

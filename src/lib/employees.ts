@@ -100,8 +100,14 @@ export function normalizeEmployeeSort(v: string | undefined): EmployeeSortKey {
  *
  * 空欄は昇順・降順のどちらでも末尾に置く（空欄が先頭に来る一覧は探しづらいため）。
  */
-function sortEmployees(list: Employee[], sort: EmployeeSortKey, desc: boolean): Employee[] {
-  const keyOf = (e: Employee): string | null => {
+/** 並び替えに使う列だけ。一覧（列を絞った取得）でも社員カードでも使えるようにしてある。 */
+type Sortable = Pick<
+  Employee,
+  "employeeNo" | "name" | "nameKana" | "orgUnitName" | "positionName" | "dutyName" | "hireDate" | "birthDate" | "status"
+>;
+
+function sortEmployees<T extends Sortable>(list: T[], sort: EmployeeSortKey, desc: boolean): T[] {
+  const keyOf = (e: T): string | null => {
     switch (sort) {
       case "employeeNo":
         return e.employeeNo;
@@ -165,6 +171,67 @@ export async function listEmployees(filter: EmployeeFilter = {}): Promise<Employ
            OR COALESCE(e.duty_name, '') ILIKE ${like})
     ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
   return sortEmployees(rows.map(mapEmployee), normalizeEmployeeSort(filter.sort), Boolean(filter.desc));
+}
+
+/** 一覧の1ページに出す人数。1,600名を一度に描くとHTMLが数MBになり表示が重い。 */
+export const EMPLOYEES_PER_PAGE = 100;
+
+/** 一覧に出す列だけ。給与区分・会計組織など38列すべては一覧に要らない。 */
+export type EmployeeListItem = Sortable & { id: string };
+
+/**
+ * 一覧の1ページ分。
+ *
+ * 並び替えは全件に対して掛けてから切り出す（ページの中だけ並ぶと使えないため）。
+ * 取る列は一覧で使うものだけにしてある。全38列を取ると 1,600名で 1.7MB になり、
+ * 本番（NeonとHTTPでやり取りする）ではそのまま待ち時間になる。
+ */
+export async function listEmployeesPage(
+  filter: EmployeeFilter & { page?: number; perPage?: number } = {},
+): Promise<{ items: EmployeeListItem[]; total: number; page: number; pages: number }> {
+  await ensureSchema();
+  const sql = getSql();
+  const q = (filter.q ?? "").trim();
+  const like = q ? `%${q}%` : null;
+  const status = filter.status ?? "active";
+  const statusFilter = status === "all" ? null : normalizeEmploymentStatus(status);
+  const orgUnitId = filter.orgUnitId || null;
+  const scope = filter.scopeOrgIds ?? null;
+  const perPage = filter.perPage ?? EMPLOYEES_PER_PAGE;
+
+  const rows = await sql`
+    SELECT e.id, e.employee_no, e.name, e.name_kana, e.position_name, e.duty_name,
+           e.hire_date, e.birth_date, e.status, o.name AS org_unit_name
+    FROM jinji_employees e
+    LEFT JOIN jinji_org_units o ON o.id = e.org_unit_id
+    WHERE (${statusFilter}::text IS NULL OR e.status = ${statusFilter})
+      AND (${orgUnitId}::uuid IS NULL OR e.org_unit_id = ${orgUnitId})
+      AND (${scope}::uuid[] IS NULL OR e.org_unit_id = ANY(${scope}::uuid[]))
+      AND (${like}::text IS NULL
+           OR e.employee_no ILIKE ${like}
+           OR e.name ILIKE ${like}
+           OR COALESCE(e.name_kana, '') ILIKE ${like}
+           OR COALESCE(e.position_name, '') ILIKE ${like}
+           OR COALESCE(e.duty_name, '') ILIKE ${like})
+    ORDER BY (e.name_kana IS NULL), e.name_kana ASC, e.employee_no ASC`;
+
+  const all: EmployeeListItem[] = rows.map((r: any) => ({
+    id: r.id as string,
+    employeeNo: r.employee_no as string,
+    name: r.name as string,
+    nameKana: (r.name_kana as string | null) ?? null,
+    orgUnitName: (r.org_unit_name as string | null) ?? null,
+    positionName: (r.position_name as string | null) ?? null,
+    dutyName: (r.duty_name as string | null) ?? null,
+    hireDate: toISODate(r.hire_date),
+    birthDate: toISODate(r.birth_date),
+    status: normalizeEmploymentStatus(r.status),
+  }));
+  const sorted = sortEmployees(all, normalizeEmployeeSort(filter.sort), Boolean(filter.desc));
+  const total = sorted.length;
+  const pages = Math.max(1, Math.ceil(total / perPage));
+  const page = Math.min(Math.max(1, Math.floor(filter.page ?? 1)), pages);
+  return { items: sorted.slice((page - 1) * perPage, page * perPage), total, page, pages };
 }
 
 export async function getEmployee(id: string): Promise<Employee | null> {
