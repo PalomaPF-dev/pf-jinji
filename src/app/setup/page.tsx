@@ -32,7 +32,8 @@ export default async function SetupPage() {
           <h1 className="text-lg font-bold text-[#333333]">PF人事管理 初期セットアップ</h1>
           <p className="mt-2 text-xs text-[#909090]">
             最初の1人（人事の責任者）を登録します。ポータルの権限が届かない状態でも
-            アプリに入れる控えです。人事考課・基本給与・設定はポータル管理者だけが扱えます。
+            アプリに入れる控えです。人事考課・基本給与・設定は
+            ポータル管理者（ポータル管理権限）だけが扱えます。
           </p>
         </div>
         <div className="rounded-xl border border-[#e5e5e5] bg-white p-6">

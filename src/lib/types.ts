@@ -30,9 +30,9 @@ export interface JinjiAdmin {
 export interface JinjiGrant {
   loginId: string;
   name: string;
-  /** ポータル管理者（role=admin）。給与・考課・設定まで扱える */
+  /** ポータル管理者＝ポータル管理権限（can_manage）。考課・給与・設定まで扱える */
   isPortalAdmin: boolean;
-  /** 管理（設定）を扱える。ポータル管理者、または責任者名簿（逃げ道） */
+  /** 設定を扱える。＝ポータル管理者かどうか（名簿の責任者では開けない） */
   isOwner: boolean;
   canPayroll: boolean;
   canEvaluation: boolean;

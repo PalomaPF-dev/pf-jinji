@@ -92,7 +92,7 @@ export default function AdminUpsertForm({ editing }: { editing?: JinjiAdmin }) {
             責任者（owner）
             <span className="block text-xs text-[#909090]">
               ポータルの権限に関わらず入室できます。ただし人事考課・基本給与・設定は
-            ポータル管理者だけのもので、名簿では開けません。
+            ポータル管理者（ポータル管理権限）だけのもので、名簿では開けません。
             </span>
           </span>
         </label>

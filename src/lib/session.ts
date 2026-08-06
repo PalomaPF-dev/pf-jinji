@@ -12,12 +12,15 @@ import type { JinjiGrant } from "./types";
  *   ゲート2（利用許可）  … **ポータルの権限**で決まる。満たさない社員番号は
  *                          ログインできても /forbidden へ。
  *
- * ポータルの権限と機能の対応:
- *   - ポータル管理者（users.role = 'admin'）
- *       … 全機能。基本給与・人事考課・設定はこの人だけで、
+ * ポータルの権限と機能の対応（**ポータル側の定義に合わせる**）:
+ *   - ポータル管理者 ＝ ポータル管理権限（users.can_manage）
+ *       … ポータルの管理画面に入れる人。青いバッジ「ポータル管理」。
+ *         全機能。人事考課・基本給与・設定はこの人だけで、
  *         ナビの見出し「ポータル管理者のみ」もこの人にしか出さない。
- *   - ポータルの管理者権限（users.can_manage）
- *       … その他の機能（社員台帳・組織図・異動申請・継続雇用・資格）。
+ *   - ポータル上の管理者（users.role = 'admin'）
+ *       … 各アプリの**承認フロー上の役割**。赤いバッジ「管理者」。ポータルの
+ *         管理画面には入れない。ここでは その他の機能（社員台帳・組織図・
+ *         異動申請・継続雇用・資格）を、自分の工場の範囲で扱える。
  *
  * ポータルの権限は SSO とプロビジョニングの両方で届き、users テーブルに保存する。
  * 判定は JWT に載せず **毎回 DB から引く**。ポータルで管理者を外した瞬間に、手元に
@@ -69,8 +72,8 @@ async function baseSession() {
  * 入室可否と権限を1回のDBアクセスで決める。使えないなら null。
  *
  * 入室できるのは次のいずれか。
- *   - ポータル管理者（users.role = 'admin'）… 全機能（考課・給与・設定を含む）
- *   - ポータルの管理者権限（users.can_manage）… 考課・給与・設定を除く機能
+ *   - ポータル管理者＝ポータル管理権限（users.can_manage）… 全機能（考課・給与・設定を含む）
+ *   - ポータル上の管理者（users.role = 'admin'）… 考課・給与・設定を除く機能
  *   - 人事の責任者（jinji_admins.is_owner）… ポータルに依存しない入室の逃げ道。
  *     ただし人事考課・基本給与・設定は開けない（ポータル管理者だけのため）
  */
@@ -88,14 +91,16 @@ export async function findGrant(loginId: string): Promise<JinjiGrant | null> {
   const r = rows[0];
   if (!r) return null;
 
-  const isPortalAdmin = r.role === "admin";
-  const isManager = Boolean(r.can_manage);
+  // ポータルの「管理者」（role='admin'）は各アプリの承認フロー上の役割で、
+  // ポータルの管理画面には入れない。ポータル管理者はポータル管理権限（can_manage）の方。
+  const isPortalAdmin = Boolean(r.can_manage);
+  const isAppAdmin = r.role === "admin";
   const isOwnerRoster = Boolean(r.is_owner);
-  if (!isPortalAdmin && !isManager && !isOwnerRoster) return null;
+  if (!isPortalAdmin && !isAppAdmin && !isOwnerRoster) return null;
 
-  // 人事考課・基本給与・設定は**ポータル管理者（role='admin'）だけ**のもの。
+  // 人事考課・基本給与・設定は**ポータル管理者（ポータル管理権限）だけ**のもの。
   // 見出しの「ポータル管理者のみ」ごと、それ以外の人には一切表示しない。
-  // 名簿の責任者（is_owner）は入室の逃げ道であって、この3つは開けない。
+  // 承認フロー上の管理者も、名簿の責任者（is_owner）も、この3つは開けない。
   return {
     loginId,
     name: (r.admin_name as string | null) ?? loginId,

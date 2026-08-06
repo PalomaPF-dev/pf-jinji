@@ -5,9 +5,9 @@ import { authOptions } from "@/lib/authOptions";
 export const dynamic = "force-dynamic";
 
 const NEED_MESSAGE: Record<string, string> = {
-  payroll: "基本給与は、ポータル管理者のみが扱えます。",
-  evaluation: "人事考課は、ポータル管理者のみが扱えます。",
-  owner: "設定は、ポータル管理者のみが開けます。",
+  payroll: "基本給与は、ポータル管理者（ポータル管理権限をお持ちの方）のみが扱えます。",
+  evaluation: "人事考課は、ポータル管理者（ポータル管理権限をお持ちの方）のみが扱えます。",
+  owner: "設定は、ポータル管理者（ポータル管理権限をお持ちの方）のみが開けます。",
 };
 
 /**
@@ -40,8 +40,8 @@ export default async function ForbiddenPage({
         )}
         <p className="mt-4 text-xs text-[#909090]">
           {need
-            ? "利用が必要な場合は、ポータルでポータル管理者の権限の付与を受けてください。"
-            : "利用が必要な場合は、ポータルの管理者に管理者権限の付与を依頼してください。"}
+            ? "利用が必要な場合は、ポータルで「ポータル管理」権限の付与を受けてください。"
+            : "利用が必要な場合は、ポータルの管理者に権限の付与を依頼してください。"}
         </p>
         <a
           href="https://portal.paloma-pf.com/"
