@@ -245,12 +245,14 @@ export async function updateOrgCodesAction(
 
   const name = str(form, "name");
   if (!name) return { error: "組織名は必須です。", values: formValues(form) };
+  // 上位組織は送られてきたときだけ変える（コードの設定画面は階層を触らない）
+  const parentId = form.has("parentId") ? nullable(form, "parentId") : before.parentId;
 
   const input: OrgUnitInput = {
     code: before.code,
     name,
     kind: before.kind,
-    parentId: before.parentId,
+    parentId,
     sort: before.sort,
     headEmployeeId: before.headEmployeeId,
     description: before.description,
@@ -279,6 +281,8 @@ export async function updateOrgCodesAction(
       event: "codes",
       nameBefore: before.name,
       nameAfter: name,
+      parentBefore: before.parentId,
+      parentAfter: parentId,
       deptCodeBefore: before.deptCode,
       deptCodeAfter: input.deptCode,
       workplaceCodeBefore: before.workplaceCode,
@@ -288,9 +292,11 @@ export async function updateOrgCodesAction(
   revalidatePath("/org");
   revalidatePath("/org/edit");
   revalidatePath("/org/codes");
+  const moved = parentId !== before.parentId;
   return {
-    message:
-      before.name === name
+    message: moved
+      ? `「${name}」の上位組織を変えました。`
+      : before.name === name
         ? `「${name}」のコードを保存しました。`
         : `「${before.name}」を「${name}」に変更しました。`,
   };

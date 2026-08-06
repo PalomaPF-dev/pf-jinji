@@ -47,6 +47,12 @@ export interface ChartNode {
   span: number;
   /** 並び替えに使うコード（部署コード → 職場コード → 数字の組織コード の順で採る） */
   sortCode: string | null;
+  /** 人事マスタの部署コード（画面に出す・組織図から直せるように） */
+  deptCode: string | null;
+  /** 人事マスタの職場コード（同上） */
+  workplaceCode: string | null;
+  /** 上位組織。組織図から階層を直すときの現在値 */
+  parentId: string | null;
   /** 階層の絞り込みで畳んだ配下（この枠より深い組織数・人数の合計） */
   hidden?: { units: number; people: number };
 }
@@ -132,6 +138,9 @@ export async function buildOrgChart(
       span: 1,
       // 自分自身のコード: 職場は職場コード（8桁）、部署は部署コード、本部は組織コード
       sortCode: n.workplaceCode ?? n.deptCode ?? (/^\d+$/.test(n.code) ? n.code : null),
+      deptCode: n.deptCode ?? null,
+      workplaceCode: n.workplaceCode ?? null,
+      parentId: n.parentId ?? null,
     };
     hostByUnitId.set(n.id, node);
     node.children = n.children.map(toChart);

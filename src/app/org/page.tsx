@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Hash, LayoutGrid, Settings2 } from "lucide-react";
+import { Hash, LayoutGrid, Pencil, Settings2 } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
-import { loadOrgChart } from "@/lib/org";
+import { activeOn, buildOrgTree, flattenTree, listOrgUnits, loadOrgChart } from "@/lib/org";
 import type { OrgNode } from "@/lib/types";
 import { todayJST } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
@@ -22,11 +22,13 @@ export const dynamic = "force-dynamic";
 export default async function OrgPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string; view?: string; dept?: string; wp?: string }>;
+  searchParams: Promise<{ asOf?: string; view?: string; dept?: string; wp?: string; edit?: string }>;
 }) {
   const s = await requireJinjiSession();
   const scope = await getScope(s.grant);
-  const { asOf, view, dept = "", wp = "" } = await searchParams;
+  const { asOf, view, dept = "", wp = "", edit } = await searchParams;
+  // 組織図を見ながら名称・コード・階層を直すモード
+  const orgEdit = edit === "1";
   const today = todayJST();
   const baseDate = asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : today;
 
@@ -71,6 +73,13 @@ export default async function OrgPage({
   if (board && wp) board = sliceChart(board, wp);
   else if (board && dept) board = sliceChart(board, dept);
 
+  // 上位組織の選択肢。編集モードのときだけ作る（普段は要らない）
+  const moveOptions = orgEdit
+    ? flattenTree(buildOrgTree(activeOn(await listOrgUnits(), baseDate), new Map(), new Map()))
+        .filter((o) => scope.orgUnitIds === null || scope.orgUnitIds.includes(o.id))
+        .map((o) => ({ id: o.id, label: o.label, depth: o.depth }))
+    : [];
+
   return (
     <div className={`mx-auto px-4 py-8 ${asBoard ? "max-w-[1600px]" : "max-w-6xl"}`}>
       <PageHeader
@@ -95,6 +104,24 @@ export default async function OrgPage({
                   <Hash className="h-4 w-4" />
                   部署・職場の設定
                 </Link>
+                {asBoard && (
+                  <Link
+                    href={`/org?${new URLSearchParams({
+                      ...(asOf ? { asOf } : {}),
+                      ...(dept ? { dept } : {}),
+                      ...(wp ? { wp } : {}),
+                      ...(orgEdit ? {} : { edit: "1" }),
+                    })}`}
+                    className={`no-print inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${
+                      orgEdit
+                        ? "bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
+                        : "border border-[#e5e5e5] bg-white text-[#555555] hover:bg-[#f7f7f5]"
+                    }`}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {orgEdit ? "編集モードを終える" : "この画面で編集"}
+                  </Link>
+                )}
                 <Link
                   href="/org/edit"
                   className="no-print inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
@@ -200,7 +227,22 @@ export default async function OrgPage({
         />
       ) : asBoard && board ? (
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-4">
-          <OrgChartBoard chart={board} planId={null} editable={false} />
+          <>
+          {orgEdit && (
+            <p className="no-print mb-3 rounded-lg border border-[#c8d8f5] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
+              枠の見出しの「編集」を押すと、その場で<strong>組織名・部署コード・職場コード・上位組織</strong>を直せます。
+              誰がぶら下がっているかを見ながら直せます。上位組織を変えると、配下もそのまま一緒に移ります。
+              変更は次の「設定 → ポータルへ連携」でポータルにも反映されます。
+            </p>
+          )}
+          <OrgChartBoard
+            chart={board}
+            planId={null}
+            editable={false}
+            orgEdit={orgEdit}
+            moveOptions={moveOptions}
+          />
+          </>
           <p className="no-print mt-3 text-xs text-[#909090]">
             配置を組み替えるには「異動案」を作ってください。組織図の上で人を動かせます。
           </p>

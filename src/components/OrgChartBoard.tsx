@@ -1,9 +1,17 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { movePersonAction } from "@/app/org/plan/actions";
+import { updateOrgCodesAction, type OrgActionState } from "@/app/org/actions";
 import type { ChartNode, ChartPerson, OrgChartData } from "@/lib/orgChart";
+
+/** 階層を変えるときの移動先の候補（本部・部署・職場のすべて）。 */
+export interface OrgMoveOption {
+  id: string;
+  label: string;
+  depth: number;
+}
 
 /**
  * 配置表（組織図）。階層ごとに列を分け、**親の枠が子の枠ぶんの高さを取る**
@@ -38,15 +46,23 @@ export default function OrgChartBoard({
   chart,
   planId,
   editable,
+  orgEdit = false,
+  moveOptions = [],
 }: {
   chart: OrgChartData;
   planId: string | null;
   editable: boolean;
+  /** 組織そのもの（名称・コード・階層）を直せるか */
+  orgEdit?: boolean;
+  moveOptions?: OrgMoveOption[];
 }) {
   const [dragging, setDragging] = useState<ChartPerson | null>(null);
   const [hoverOrg, setHoverOrg] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // 組織の編集は1つずつ開く。上位組織の選択肢を全枠ぶん描くと、
+  // 200枠 × 200候補で HTML が数MBになるため（社員台帳で同じ轍を踏んでいる）
+  const [editingOrg, setEditingOrg] = useState<string | null>(null);
 
   const canDrag = editable && Boolean(planId);
 
@@ -141,6 +157,7 @@ export default function OrgChartBoard({
                   return (
                     <td
                       key={node.orgUnitId}
+                      data-org={node.orgUnitId}
                       rowSpan={node.span}
                       colSpan={node.children.length === 0 ? cols - col : 1}
                       onDragOver={(e) => {
@@ -157,12 +174,14 @@ export default function OrgChartBoard({
                         hoverOrg === node.orgUnitId ? "bg-[#eff6ff] outline outline-2 outline-[#2563eb]" : "bg-white"
                       }`}
                     >
-                      <div className="border-b border-[#e5e5e5] bg-[#fafafa] px-1.5 py-0.5 text-[11px] font-bold text-[#333]">
-                        {node.orgUnitName}
-                        {node.people.length > 0 && (
-                          <span className="ml-1 font-normal text-[#909090]">{node.people.length}名</span>
-                        )}
-                      </div>
+                      <OrgCellHeader
+                        node={node}
+                        orgEdit={orgEdit}
+                        moveOptions={moveOptions}
+                        editing={editingOrg === node.orgUnitId}
+                        onEdit={() => setEditingOrg(node.orgUnitId)}
+                        onClose={() => setEditingOrg(null)}
+                      />
                       {node.hidden && (
                         <p className="border-b border-[#f0f0f0] bg-[#fbfbfb] px-1.5 py-0.5 text-[10px] text-[#909090]">
                           配下 {node.hidden.units}組織 {node.hidden.people}名（階層の絞り込みで省略）
@@ -227,6 +246,115 @@ export default function OrgChartBoard({
             {chart.unassigned.length > 30 && ` ほか ${chart.unassigned.length - 30} 名`}
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+
+/**
+ * 枠の見出し。組織名と、人事システムのコードを出す。
+ *
+ * 編集モードでは、この見出しがそのまま入力欄になる。誰がぶら下がっているかを
+ * 見ながら直せるようにするため、別画面へ飛ばさずここで完結させている。
+ * 上位組織の選択肢は**開いている1枠ぶんだけ**描く（全枠に持たせると HTML が膨らむ）。
+ */
+function OrgCellHeader({
+  node,
+  orgEdit,
+  moveOptions,
+  editing,
+  onEdit,
+  onClose,
+}: {
+  node: ChartNode;
+  orgEdit: boolean;
+  moveOptions: OrgMoveOption[];
+  editing: boolean;
+  onEdit: () => void;
+  onClose: () => void;
+}) {
+  const [state, formAction] = useActionState(updateOrgCodesAction, {} as OrgActionState);
+  const codes = [node.deptCode, node.workplaceCode].filter(Boolean).join(" / ");
+
+  if (orgEdit && editing) {
+    return (
+      <form
+        action={formAction}
+        className="border-b border-[#2563eb] bg-[#eff6ff] p-1.5 text-[11px]"
+      >
+        <input type="hidden" name="id" value={node.orgUnitId} />
+        <input
+          name="name"
+          required
+          defaultValue={node.orgUnitName}
+          aria-label="組織名"
+          className="mb-1 w-full rounded border border-[#c8d8f5] bg-white px-1 py-0.5 text-[11px] font-bold outline-none focus:border-[#2563eb]"
+        />
+        <div className="mb-1 flex gap-1">
+          <input
+            name="deptCode"
+            defaultValue={node.deptCode ?? ""}
+            placeholder="部署コード"
+            aria-label="部署コード"
+            className="w-1/2 rounded border border-[#c8d8f5] bg-white px-1 py-0.5 font-mono text-[10px] outline-none focus:border-[#2563eb]"
+          />
+          <input
+            name="workplaceCode"
+            defaultValue={node.workplaceCode ?? ""}
+            placeholder="職場コード"
+            aria-label="職場コード"
+            className="w-1/2 rounded border border-[#c8d8f5] bg-white px-1 py-0.5 font-mono text-[10px] outline-none focus:border-[#2563eb]"
+          />
+        </div>
+        <select
+          name="parentId"
+          defaultValue={node.parentId ?? ""}
+          aria-label="上位組織"
+          className="mb-1 w-full rounded border border-[#c8d8f5] bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#2563eb]"
+        >
+          <option value="">（最上位）</option>
+          {moveOptions
+            .filter((o) => o.id !== node.orgUnitId)
+            .map((o) => (
+              <option key={o.id} value={o.id}>
+                {"　".repeat(o.depth)}
+                {o.label}
+              </option>
+            ))}
+        </select>
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            className="rounded bg-[#2563eb] px-2 py-0.5 text-[10px] font-medium text-white hover:bg-[#1d4ed8]"
+          >
+            保存
+          </button>
+          <button type="button" onClick={onClose} className="text-[10px] text-[#707070] hover:underline">
+            やめる
+          </button>
+          {state.error && <span className="text-[10px] text-[#b91c1c]">{state.error}</span>}
+          {state.message && <span className="text-[10px] text-[#1c7a4d]">保存しました</span>}
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="border-b border-[#e5e5e5] bg-[#fafafa] px-1.5 py-0.5 text-[11px] font-bold text-[#333]">
+      {node.orgUnitName}
+      {node.people.length > 0 && (
+        <span className="ml-1 font-normal text-[#909090]">{node.people.length}名</span>
+      )}
+      {codes && <span className="ml-1 font-mono text-[10px] font-normal text-[#909090]">{codes}</span>}
+      {orgEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="no-print ml-1 font-normal text-[10px] text-[#2563eb] hover:underline"
+        >
+          編集
+        </button>
       )}
     </div>
   );
