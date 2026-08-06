@@ -305,36 +305,45 @@ async function applyPrefixRules(sql: any, result: RestructureResult): Promise<vo
     const head = new RegExp(`^${rule.prefix}[\\s　]+`);
     const units: any[] = await sql`SELECT id, parent_id, code, name FROM jinji_org_units`;
     const targets = units.filter((u) => head.test(u.name as string));
-    if (targets.length === 0) continue;
 
-    // 受け皿の部。同名があればそれを使い、無ければ作る
+    // 受け皿の部。同名があればそれを使う。無いときは、改名する組織があるときだけ作る
+    // （名簿にその部が居ない環境で、勝手に部を生やさないため）。
     const norm = (v: string) => normalizeOrgName(v);
     const dept =
       units.find((u) => norm(u.name as string) === norm(rule.dept)) ??
-      (
-        await sql`
+      (targets.length === 0
+        ? null
+        : (
+            await sql`
           INSERT INTO jinji_org_units (code, name, kind, parent_id)
           VALUES (${`AUTO-${rule.dept}`}, ${rule.dept}, ${"bu"},
                   ${(targets[0].parent_id as string | null) ?? null})
           ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
           RETURNING id, parent_id, code, name`
-      )[0];
+          )[0]);
     if (!dept) continue;
 
     // 部と職場のあいだの室。無ければ作る
     const middle =
       units.find((u) => norm(u.name as string) === norm(rule.middle)) ??
-      (
-        await sql`
+      (targets.length === 0
+        ? null
+        : (
+            await sql`
           INSERT INTO jinji_org_units (code, name, kind, parent_id)
           VALUES (${`AUTO-${rule.middle}`}, ${rule.middle}, ${"ka"}, ${dept.id})
           ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
           RETURNING id, parent_id, code, name`
-      )[0];
+          )[0]);
     if (!middle) continue;
+    // 室は必ず部の直下に置く。名簿側の名前がすでに短くなっていて改名するものが
+    // 無いときでも、ここだけは掛け直す（室が部から外れると階層が崩れるため）。
     if (middle.parent_id !== dept.id) {
       await sql`UPDATE jinji_org_units SET parent_id = ${dept.id} WHERE id = ${middle.id}`;
+      middle.parent_id = dept.id;
+      result.moved++;
     }
+    if (targets.length === 0) continue;
 
     // 接頭辞を落として室の下へ
     const ids: string[] = [];
