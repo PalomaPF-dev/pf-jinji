@@ -54,11 +54,12 @@ export default function AppShell({
         { href: "/reemployments", label: "継続雇用申請書", icon: FileClock },
       ],
     },
-    // 給与・考課は設定と並ぶ「管理」。ポータル管理者にだけ出す
+    // 給与・考課・設定はポータル管理者だけのもの。見出しにそう書いて、
+    // ポータルの管理者権限（can_manage）だけの人にはグループごと出さない
     ...(canEvaluation || canPayroll || isOwner
       ? [
           {
-            title: "管理",
+            title: "ポータル管理者のみ",
             items: [
               ...(canEvaluation ? [{ href: "/evaluations", label: "人事考課", icon: ClipboardCheck }] : []),
               ...(canPayroll ? [{ href: "/salaries", label: "基本給与", icon: Wallet }] : []),
