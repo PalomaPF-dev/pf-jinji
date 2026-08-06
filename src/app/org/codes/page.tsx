@@ -10,13 +10,16 @@ import { ORG_KIND_LABEL } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 /**
- * 部署コード・職場コードの設定。
+ * 部署・職場の設定（名称とコード）。
  *
  * コードは2つの役目を持つ。
  *   1. 人事システムの台帳と突き合わせるための番号
  *   2. ポータルの部署・職場を作る／紐づけるときの鍵（hr_code）
- * 人事マスタのExcelを取り込むと入るが、組織が増えたとき・番号が変わったときに
+ * 人事マスタのExcelを取り込むと入るが、組織が増えたとき・名前や番号が変わったときに
  * 取込を待たずに直せるよう、この画面から追加・修正・削除できるようにしてある。
+ *
+ * 名前を変えるとポータル側の部署・職場の名前も次の連携で変わる（コードで突き合わせるため、
+ * ポータルのコード D001 等や、部署へのアプリ割当は変わらない）。
  */
 export default async function OrgCodesPage({
   searchParams,
@@ -61,17 +64,22 @@ export default async function OrgCodesPage({
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <PageHeader
-        title="部署コード・職場コードの設定"
+        title="部署・職場の設定"
         description={`${rows.length} 件${scope.scopeName ? `（${scope.scopeName}）` : ""}`}
         backHref="/org"
         backLabel="組織図へ戻る"
       />
 
       <div className="mb-5 rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-4 text-xs text-[#707070]">
-        コードは<strong>人事システムの台帳との突合</strong>と、
-        <strong>ポータルの部署・職場との紐づけ</strong>に使います。
-        人事マスタのExcelを取り込むと自動で入りますが、組織が増えたときや番号が変わったときは
-        ここで直せます。名称・階層・組織の長は{" "}
+        <strong>組織名・部署コード・職場コード</strong>を直せます。コードは
+        <strong>人事システムの台帳との突合</strong>と、
+        <strong>ポータルの部署・職場との紐づけ</strong>に使う番号です。
+        人事マスタのExcelを取り込むと自動で入りますが、組織が増えたときや名前・番号が
+        変わったときはここで直せます。
+        <br />
+        名前を変えると、次のポータル連携で<strong>ポータル側の部署・職場の名前も変わります</strong>
+        （突合はコードで行うため、ポータルの部署コード D001 等やアプリの割当は変わりません）。
+        階層（上位組織）・組織の長は{" "}
         <Link href="/org/edit" className="text-[#2563eb] hover:underline">
           組織の編集
         </Link>{" "}
@@ -120,30 +128,37 @@ export default async function OrgCodesPage({
         <table className="w-full min-w-[860px] text-[13px] leading-5">
           <thead>
             <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
-              <th className="px-3 py-2 font-medium">組織名</th>
               <th className="px-3 py-2 font-medium">区分</th>
               <th className="px-3 py-2 font-medium">上位組織</th>
               <th className="px-3 py-2 font-medium">在籍</th>
-              <th className="px-3 py-2 font-medium">部署コード / 職場コード</th>
+              <th className="px-3 py-2 font-medium">組織名 / 部署コード / 職場コード</th>
               <th className="px-3 py-2 font-medium"> </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((u) => (
               <tr key={u.id} className="border-b border-[#f0f0f0] last:border-0 hover:bg-[#fafafa]">
-                <td className="px-3 py-1.5">
-                  <Link href={`/org/edit?id=${u.id}`} className="font-medium text-[#2563eb] hover:underline">
-                    {u.name}
+                <td className="px-3 py-1.5 whitespace-nowrap text-[#555555]">
+                  {ORG_KIND_LABEL[u.kind]}
+                  <Link
+                    href={`/org/edit?id=${u.id}`}
+                    title="組織の編集（階層・組織の長）"
+                    className="ml-2 font-mono text-[11px] text-[#2563eb] hover:underline"
+                  >
+                    {u.code}
                   </Link>
-                  <span className="ml-2 font-mono text-[11px] text-[#909090]">{u.code}</span>
                 </td>
-                <td className="px-3 py-1.5 text-[#555555]">{ORG_KIND_LABEL[u.kind]}</td>
                 <td className="px-3 py-1.5 text-[#555555]">
                   {u.parentId ? (nameById.get(u.parentId) ?? "—") : "（最上位）"}
                 </td>
                 <td className="px-3 py-1.5 tabular-nums text-[#707070]">{counts.get(u.id) ?? 0}</td>
                 <td className="px-3 py-1.5">
-                  <OrgCodeRowForm id={u.id} deptCode={u.deptCode} workplaceCode={u.workplaceCode} />
+                  <OrgCodeRowForm
+                    id={u.id}
+                    name={u.name}
+                    deptCode={u.deptCode}
+                    workplaceCode={u.workplaceCode}
+                  />
                 </td>
                 <td className="px-3 py-1.5 text-right">
                   <OrgCodeDeleteForm id={u.id} name={u.name} />
@@ -152,7 +167,7 @@ export default async function OrgCodesPage({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-[#909090]">
+                <td colSpan={5} className="px-4 py-8 text-center text-sm text-[#909090]">
                   該当する組織がありません。
                 </td>
               </tr>

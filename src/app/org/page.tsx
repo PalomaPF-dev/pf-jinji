@@ -93,7 +93,7 @@ export default async function OrgPage({
                   className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
                 >
                   <Hash className="h-4 w-4" />
-                  部署・職場コード
+                  部署・職場の設定
                 </Link>
                 <Link
                   href="/org/edit"
