@@ -4,6 +4,7 @@ import { activeOn, buildOrgTree, listOrgUnits } from "./org";
 import { normalizeOrgName } from "./hrMasterImport";
 import type { OrgKind, OrgNode } from "./types";
 import type { OrgPlanMove } from "./orgPlans";
+import { listConcurrentMembers } from "./concurrentPosts";
 
 /**
  * 組織図（配置表）の描画データ。
@@ -32,6 +33,8 @@ export interface ChartPerson {
   movingToOrgUnitName: string | null;
   /** 案によってこの枠に来ている（元は別の組織） */
   incoming: boolean;
+  /** 兼務でこの枠に出ている（本務は別の組織）。人数には数えない */
+  concurrent?: boolean;
 }
 
 export interface ChartNode {
@@ -79,6 +82,8 @@ export interface OrgChartData {
 const POSITION_RANKS: { re: RegExp; rank: number }[] = [
   { re: /常務取締役/, rank: 0 },
   { re: /取締役/, rank: 1 },
+  // 「副本部長」は「本部長」を含むので、先に検査する
+  { re: /副本部長/, rank: 3 },
   { re: /本部長|部門長/, rank: 2 },
   { re: /副工場長/, rank: 12 },
   { re: /工場長代理/, rank: 13 },
@@ -319,13 +324,37 @@ export async function buildOrgChart(
     host.people.push(person);
   }
 
-  // 枠の中の並び: 長（統合分）→ 自組織、その中では
+  // ===== 兼務の人を枠へ足す =====
+  // 本務の人のあとに、その枠を兼務している人を並べる。人数には数えない
+  // （在籍者数・部署別人数は本務だけで数える）ので、印を付けて見分けられるようにする。
+  for (const m of await listConcurrentMembers(asOf)) {
+    const host = hostByUnitId.get(m.orgUnitId);
+    if (!host) continue;
+    if (host.people.some((p) => p.employeeId === m.employeeId)) continue; // 本務と同じ枠なら出さない
+    host.people.push({
+      employeeId: m.employeeId,
+      employeeNo: m.employeeNo,
+      name: m.name,
+      orgUnitId: m.orgUnitId,
+      orgUnitName: nameById.get(m.orgUnitId) ?? "",
+      positionName: m.positionName,
+      dutyName: m.dutyName,
+      mark: null,
+      movingToOrgUnitId: null,
+      movingToOrgUnitName: null,
+      incoming: false,
+      concurrent: true,
+    });
+  }
+
+  // 枠の中の並び: 本務 → 兼務、本務の中では 長（統合分）→ 自組織、さらにその中では
   //   1. 職務の序列（グループ長・室長…）— 職場を率いているのは職務なので最優先
   //   2. 役職の序列（部長・課長・係長…）
   // 同順位はカナ順のまま。
   const sortPeople = (node: ChartNode) => {
     node.people.sort(
       (a, b) =>
+        (a.concurrent ? 1 : 0) - (b.concurrent ? 1 : 0) ||
         (unitRank.get(a.orgUnitId) ?? 99) - (unitRank.get(b.orgUnitId) ?? 99) ||
         dutyRank(a.dutyName) - dutyRank(b.dutyName) ||
         positionRank(a.positionName) - positionRank(b.positionName),
@@ -337,7 +366,8 @@ export async function buildOrgChart(
   // 誰も居ない本部（ポータル由来の部署系統など）は表に出さない。
   // 空の職場は異動の受け皿として残すが、丸ごと空の系統は行のノイズになるだけのため。
   const totalPeople = (n: ChartNode): number =>
-    n.people.length + n.children.reduce((s, c) => s + totalPeople(c), 0);
+    n.people.filter((p) => !p.concurrent).length +
+    n.children.reduce((s, c) => s + totalPeople(c), 0);
   const visibleRoots = roots.filter((r) => totalPeople(r) > 0);
   let visibleMaxDepth = 0;
   const measure = (n: ChartNode) => {
@@ -384,12 +414,13 @@ export function limitChartDepth(chart: OrgChartData, maxLevels: number | null): 
   const countUnits = (n: ChartNode): number =>
     1 + n.children.reduce((s, c) => s + countUnits(c), 0);
   const countPeople = (n: ChartNode): number =>
-    n.people.length + n.children.reduce((s, c) => s + countPeople(c), 0);
+    n.people.filter((p) => !p.concurrent).length +
+    n.children.reduce((s, c) => s + countPeople(c), 0);
 
   const clone = (n: ChartNode): ChartNode => {
     if (n.depth >= cutoff && n.children.length > 0) {
       const units = countUnits(n) - 1;
-      const people = countPeople(n) - n.people.length;
+      const people = countPeople(n) - n.people.filter((p) => !p.concurrent).length;
       return { ...n, children: [], span: 1, hidden: { units, people } };
     }
     const children = n.children.map(clone);

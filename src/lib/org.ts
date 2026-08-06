@@ -86,8 +86,25 @@ export function buildOrgTree(
     else roots.push(node);
   }
 
+  // 並びはコード順（職場コード → 部署コード → 数字の組織コード）。
+  // 人事システムのコードは階層と業務の順序をそのまま表しているので、
+  // 名前順より現場の見え方に合う。配置表（orgChart）とも揃える。
+  // コードを持たない組織（配置表で人が足したもの）は sort → 名前 で後ろに置く。
+  const codeOf = (n: OrgNode): string | null =>
+    n.workplaceCode ?? n.deptCode ?? (/^\d+$/.test(n.code) ? n.code : null);
   const sortNodes = (list: OrgNode[]) => {
-    list.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, "ja"));
+    list.sort((a, b) => {
+      const ca = codeOf(a);
+      const cb = codeOf(b);
+      if (ca && cb) {
+        const na = Number(ca);
+        const nb = Number(cb);
+        if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+        if (ca !== cb) return ca < cb ? -1 : 1;
+      } else if (ca) return -1;
+      else if (cb) return 1;
+      return a.sort - b.sort || a.name.localeCompare(b.name, "ja");
+    });
     for (const n of list) sortNodes(n.children);
   };
   sortNodes(roots);

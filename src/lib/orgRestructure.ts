@@ -90,6 +90,8 @@ interface Unit {
   name: string;
   kind: string;
   parent_id: string | null;
+  dept_code: string | null;
+  workplace_code: string | null;
 }
 
 /**
@@ -106,13 +108,15 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
   await applyPrefixRules(sql, result);
 
   const units: Unit[] = (
-    await sql`SELECT id, code, name, kind, parent_id FROM jinji_org_units`
+    await sql`SELECT id, code, name, kind, parent_id, dept_code, workplace_code FROM jinji_org_units`
   ).map((u: any) => ({
     id: u.id as string,
     code: u.code as string,
     name: u.name as string,
     kind: u.kind as string,
     parent_id: (u.parent_id as string | null) ?? null,
+    dept_code: (u.dept_code as string | null) ?? null,
+    workplace_code: (u.workplace_code as string | null) ?? null,
   }));
   const byId = new Map(units.map((u) => [u.id, u]));
 
@@ -144,6 +148,7 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
 
   // ===== 第2階層（部・工場）の枠を決める =====
   const parentOf = new Map<string, string>(); // 動かす組織 → 新しい親
+  const codeOf = new Map<string, { dept?: string; wp?: string }>(); // 組織 → 埋めるコード
   const toCreate: { key: string; code: string; name: string; kind: string; parentId: string }[] = [];
   const frameByGroup = new Map<string, { unit?: Unit; createKey?: string }>();
 
@@ -214,6 +219,8 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
         name: row.name as string,
         kind: row.kind as string,
         parent_id: (row.parent_id as string | null) ?? null,
+        dept_code: null,
+        workplace_code: null,
       };
       units.push(u);
       byId.set(u.id, u);
@@ -261,6 +268,19 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
     for (const l of level3) {
       if (l.parent_id !== frame.id) parentOf.set(l.id, frame.id);
     }
+
+    // 組織図に出すコードを埋める。
+    //   職場コード … 所属組織コード（8桁）そのもの
+    //   部署コード … その系統の上位4桁（1212=大口工場、1336=調達部…）
+    // 人事マスタ（階層シート）を取り込むと、より正確な部署コードで上書きされる。
+    // すでに値が入っている組織は触らない。
+    for (const m of [frame, ...members]) {
+      if (/^\d{8}$/.test(m.code) && !m.workplace_code) codeOf.set(m.id, { wp: m.code });
+      if (!m.dept_code) {
+        const prev = codeOf.get(m.id) ?? {};
+        codeOf.set(m.id, { ...prev, dept: g.key });
+      }
+    }
   }
 
   // ===== まとめて付け替え（親が先祖に居ない＝輪にならないことを確かめてから）=====
@@ -290,6 +310,22 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
       FROM unnest(${ids}::uuid[], ${pids}::uuid[]) AS v(id, pid)
       WHERE o.id = v.id`;
     result.moved += ids.length;
+  }
+
+  // コードの穴埋め。COALESCE で「すでに入っている値」を優先する
+  const cIds = [...codeOf.keys()];
+  if (cIds.length > 0) {
+    await sql`
+      UPDATE jinji_org_units o
+      SET dept_code = COALESCE(o.dept_code, v.dept),
+          workplace_code = COALESCE(o.workplace_code, v.wp)
+      FROM unnest(
+        ${cIds}::uuid[],
+        ${cIds.map((id) => codeOf.get(id)?.dept ?? null)}::text[],
+        ${cIds.map((id) => codeOf.get(id)?.wp ?? null)}::text[]
+      ) AS v(id, dept, wp)
+      WHERE o.id = v.id
+        AND (o.dept_code IS NULL OR o.workplace_code IS NULL)`;
   }
 
   return result;

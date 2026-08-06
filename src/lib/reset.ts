@@ -10,7 +10,7 @@ import { ensureSchema } from "./schema";
  * 一度おかしくなった所属や組織の形は、消してから入れ直すのがいちばん確実。
  *
  * ■ 消すもの
- *   社員台帳・組織・異動申請・継続雇用申請・人事考課・基本給与・保有資格・異動案・採番
+ *   社員台帳・組織・異動申請・継続雇用申請・人事考課・基本給与・保有資格・兼務・異動案・採番
  *   （社員に紐づくものは外部キーの CASCADE でも落ちるが、順番に消して件数を返す）
  *
  * ■ 残すもの
@@ -58,7 +58,7 @@ export async function resetHrData(): Promise<ResetResult> {
     TRUNCATE TABLE
       jinji_employees, jinji_org_units, jinji_transfers, jinji_transfer_items,
       jinji_transfer_approvals, jinji_reemployments, jinji_reemployment_approvals,
-      jinji_evaluations, jinji_salaries, jinji_qualifications,
+      jinji_evaluations, jinji_salaries, jinji_qualifications, jinji_concurrent_posts,
       jinji_org_plans, jinji_org_plan_moves, jinji_counters
     RESTART IDENTITY CASCADE`;
 

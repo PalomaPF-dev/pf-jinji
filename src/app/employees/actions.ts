@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { assertJinjiSession } from "@/lib/session";
+import { assertJinjiSession, assertOwnerSession } from "@/lib/session";
+import { getScope, inScope } from "@/lib/scope";
 import { recordAudit } from "@/lib/audit";
 import { parseCsvObjects } from "@/lib/csv";
 import { readXlsx, sheetToObjects } from "@/lib/xlsx";
@@ -23,6 +24,12 @@ import {
   type CsvImportResult,
   type EmployeeInput,
 } from "@/lib/employees";
+import {
+  addConcurrentPost,
+  deleteConcurrentPost,
+  validateConcurrentPost,
+  type ConcurrentPostInput,
+} from "@/lib/concurrentPosts";
 import { normalizeEmploymentStatus, type Gender } from "@/lib/types";
 import { formValues, type FormValues } from "@/lib/formState";
 
@@ -131,14 +138,28 @@ export async function updateEmployeeAction(_prev: ActionState, form: FormData): 
 }
 
 /**
- * 社員の削除。
- * 給与・考課・異動申請・資格も併せて消えるため、退職の記録は status='retired' で残すのが正。
+ * 社員カードの削除。
+ *
+ * 給与・考課・異動申請・資格・兼務も一緒に消える。**退職の記録を残したいだけなら
+ * 在籍状態を「退職」にするのが正**なので、画面でもそちらを先に案内している。
+ *
+ * 取り消せないので二重に守る:
+ *  - ポータル管理者だけが実行できる
+ *  - 社員番号を打ち直してもらう（一覧から誤って押しても消えないように）
  */
 export async function deleteEmployeeAction(_prev: ActionState, form: FormData): Promise<ActionState> {
-  const s = await assertJinjiSession();
+  const s = await assertOwnerSession();
   const id = str(form, "id");
   const target = await getEmployee(id);
   if (!target) return { error: "対象が見つかりません。" };
+  if (str(form, "confirm") !== target.employeeNo) {
+    // 打った値を返す。React 19 はアクションの後にフォームを初期化するので、
+    // 返さないと打ち直しになる（他のフォームと同じ扱い）。
+    return {
+      error: `確認のため、社員番号「${target.employeeNo}」を入力してください。`,
+      values: formValues(form),
+    };
+  }
 
   await deleteEmployee(id);
   await recordAudit({
@@ -313,4 +334,89 @@ export async function importEmployeesAction(_prev: ActionState, form: FormData):
     }）`,
     importResult: result,
   };
+}
+
+// ===== 兼務 =====
+
+/**
+ * 兼務を足す。
+ *
+ * 本務は名簿の取込で上書きされるので、兼務は人事側の入力として別に持つ。
+ * 範囲外（自分の工場の外）の社員は触れない。
+ */
+export async function addConcurrentPostAction(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const s = await assertJinjiSession();
+  const employeeId = str(form, "employeeId");
+  const target = await getEmployee(employeeId);
+  if (!target) return { error: "対象の社員が見つかりません。" };
+  const scope = await getScope(s.grant);
+  if (!inScope(scope, target.orgUnitId)) return { error: "この社員を編集する権限がありません。" };
+
+  const input: ConcurrentPostInput = {
+    employeeId,
+    orgUnitId: str(form, "orgUnitId"),
+    positionName: nullable(form, "positionName"),
+    dutyName: nullable(form, "dutyName"),
+    startedOn: nullable(form, "startedOn"),
+    endedOn: nullable(form, "endedOn"),
+    note: nullable(form, "note"),
+  };
+  const problem = validateConcurrentPost(input, target.orgUnitId);
+  if (problem) return { error: problem, values: formValues(form) };
+
+  try {
+    await addConcurrentPost(input);
+  } catch (e) {
+    const msg =
+      (e as { code?: string }).code === "23505"
+        ? "その組織はすでに兼務先として登録されています。"
+        : (e as Error).message;
+    return { error: msg, values: formValues(form) };
+  }
+
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_employee",
+    targetType: "employee",
+    targetId: employeeId,
+    targetLabel: `${target.employeeNo} ${target.name}`,
+    detail: { 兼務を追加: input.orgUnitId },
+  });
+  revalidatePath(`/employees/${employeeId}`);
+  revalidatePath("/employees");
+  revalidatePath("/org");
+  return { message: "兼務を追加しました。" };
+}
+
+/** 兼務を消す。 */
+export async function deleteConcurrentPostAction(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  const s = await assertJinjiSession();
+  const employeeId = str(form, "employeeId");
+  const id = str(form, "id");
+  const target = await getEmployee(employeeId);
+  if (!target) return { error: "対象の社員が見つかりません。" };
+  const scope = await getScope(s.grant);
+  if (!inScope(scope, target.orgUnitId)) return { error: "この社員を編集する権限がありません。" };
+
+  await deleteConcurrentPost(id, employeeId);
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_employee",
+    targetType: "employee",
+    targetId: employeeId,
+    targetLabel: `${target.employeeNo} ${target.name}`,
+    detail: { 兼務を削除: id },
+  });
+  revalidatePath(`/employees/${employeeId}`);
+  revalidatePath("/employees");
+  revalidatePath("/org");
+  return { message: "兼務を削除しました。" };
 }
