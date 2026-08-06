@@ -1,23 +1,61 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import type { HeadcountNow as Now } from "@/lib/headcount";
 
 /**
- * いまの人数を部・工場ごとに出す。
+ * いまの人数を、組織図（配置表）と同じ階層のまま出す。
  *
- * 部・工場は13前後だが、その配下の職場まで並べると200行を超えてダッシュボードが
- * 読めなくなる。そこで**部・工場の行は常に見せ、職場は開いたときだけ**出す
- * （details/summary なので JavaScript は要らない）。
+ * 列は配置表の第2〜第4階層に対応させている。どの列に名前があるかで階層が読めるので、
+ * 字下げより誤解が少ない。
  *
- * 各行には人数に比例した細い帯を添える。数字だけだと「どこが大きいか」を
- * 読み取るのに全行を見比べることになるため。
+ * 数は2列に分ける。1つの列に「その枠の人数」と「配下を含む人数」を混ぜると、
+ * どちらの意味なのかが行ごとに変わって読めなくなるため。
  */
 
-function Bar({ value, max }: { value: number; max: number }) {
-  const w = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+/** 枠1つぶんの行。level 0 = 部・工場（第2階層）、1 = 第3階層、2以降 = 第4階層。 */
+function Row({
+  name,
+  level,
+  own,
+  total,
+  bold,
+}: {
+  name: string;
+  level: number;
+  own: number;
+  total: number | null;
+  bold?: boolean;
+}) {
+  const col = Math.min(level, 2);
   return (
-    <span className="block h-1.5 w-full rounded-full bg-[#f0f0f0]">
-      <span className="block h-1.5 rounded-full bg-[#2563eb]" style={{ width: `${w}%` }} />
-    </span>
+    <tr className="border-b border-[#f4f4f4] last:border-0">
+      {[0, 1, 2].map((i) => (
+        <td
+          key={i}
+          className={`px-2 py-1 ${
+            i === col
+              ? bold
+                ? "font-medium text-[#333333]"
+                : "text-[#555555]"
+              : ""
+          }`}
+          // 第4階層より深い枠（配置表で人が足したもの）は字下げで表す
+          style={
+            i === col && level > 2 ? { paddingLeft: `${0.5 + (level - 2) * 0.75}rem` } : undefined
+          }
+        >
+          {i === col ? name : ""}
+        </td>
+      ))}
+      <td className="w-16 px-2 py-1 text-right tabular-nums text-[#555555]">{own || ""}</td>
+      <td
+        className={`w-16 px-2 py-1 text-right tabular-nums ${
+          bold ? "font-medium text-[#333333]" : "text-[#909090]"
+        }`}
+      >
+        {total ?? ""}
+      </td>
+    </tr>
   );
 }
 
@@ -25,86 +63,53 @@ export default function HeadcountNow({ now }: { now: Now }) {
   if (now.groups.length === 0) {
     return <p className="text-sm text-[#909090]">対象の部署がありません。</p>;
   }
-  const max = Math.max(...now.groups.map((g) => g.total));
 
   return (
     <div>
-      <ul className="divide-y divide-[#f0f0f0] border-y border-[#f0f0f0]">
-        {now.groups.map((g) => {
-          const head = (
-            <>
-              <span className="w-44 shrink-0 truncate text-[13px] font-medium text-[#333333]">
-                {g.name}
-              </span>
-              <span className="min-w-0 flex-1">
-                <Bar value={g.total} max={max} />
-              </span>
-              <span className="w-16 shrink-0 text-right text-[13px] font-medium tabular-nums text-[#333333]">
-                {g.total.toLocaleString()}名
-              </span>
-            </>
-          );
-          // 配下が無い枠（本部の直属など）は開いても中身が無いので、ただの行にする
-          if (g.units.length === 0) {
-            return (
-              <li key={g.orgId} className="flex items-center gap-3 py-2">
-                <span className="w-4 shrink-0" />
-                {head}
-              </li>
-            );
-          }
-          return (
-            <li key={g.orgId}>
-              <details className="group">
-                <summary className="flex cursor-pointer list-none items-center gap-3 py-2 hover:bg-[#fafafa]">
-                  <span className="w-4 shrink-0 text-center text-[10px] text-[#a0a0a0] group-open:rotate-90">
-                    ▶
-                  </span>
-                  {head}
-                </summary>
+      <div className="max-h-[520px] overflow-y-auto rounded-lg border border-[#e5e5e5]">
+        <table className="w-full text-[13px]">
+          <thead className="sticky top-0 z-10 bg-[#fafafa] text-left text-xs text-[#707070]">
+            <tr className="border-b border-[#e5e5e5]">
+              <th className="w-48 px-2 py-2 font-medium">第2階層（部・工場）</th>
+              <th className="w-48 px-2 py-2 font-medium">第3階層（室・共通・総務）</th>
+              <th className="px-2 py-2 font-medium">第4階層（職場）</th>
+              <th className="w-16 px-2 py-2 text-right font-medium">所属</th>
+              <th className="w-16 px-2 py-2 text-right font-medium">計</th>
+            </tr>
+          </thead>
+          <tbody>
+            {now.groups.map((g) => (
+              <Fragment key={g.orgId}>
+                <Row name={g.name} level={0} own={g.own} total={g.total} bold />
+                {g.units.map((u) => (
+                  <Row
+                    key={u.orgId}
+                    name={u.name}
+                    level={u.level}
+                    own={u.own}
+                    total={u.total === u.own ? null : u.total}
+                  />
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-                <table className="mb-2 w-full text-[13px]">
-                  <tbody>
-                    {g.own > 0 && (
-                      <tr className="text-[#707070]">
-                        <td className="py-1 pl-11">{g.name}（直属）</td>
-                        <td className="w-20 py-1 pr-1 text-right tabular-nums">{g.own}</td>
-                      </tr>
-                    )}
-                    {g.units.map((u) => (
-                      <tr key={u.orgId} className="text-[#555555]">
-                        <td
-                          className="py-1"
-                          style={{ paddingLeft: `${2.75 + (u.level - 1) * 1}rem` }}
-                        >
-                          {u.name}
-                          {u.total !== u.own && (
-                            <span className="ml-2 text-[11px] text-[#a0a0a0]">
-                              配下計 {u.total}
-                            </span>
-                          )}
-                        </td>
-                        <td className="w-20 py-1 pr-1 text-right tabular-nums">{u.own}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </details>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="mt-3 flex items-center gap-3 text-[13px]">
-        <span className="w-44 shrink-0 pl-7 font-medium text-[#333333]">合計</span>
-        <span className="min-w-0 flex-1" />
-        <span className="w-16 shrink-0 text-right font-medium tabular-nums text-[#333333]">
+      {/* 合計は表の外に置く。中に入れると一番下までスクロールしないと見えないため */}
+      <div className="mt-2 flex items-baseline justify-end gap-3 text-[13px]">
+        <span className="font-medium text-[#333333]">合計</span>
+        <span className="w-16 pr-2 text-right font-medium tabular-nums text-[#333333]">
           {now.total.toLocaleString()}名
         </span>
       </div>
 
+      <p className="mt-2 text-xs text-[#909090]">
+        「所属」はその枠に直接いる人数、「計」は配下を含む人数です。
+      </p>
+
       {now.unassigned > 0 && (
-        <p className="mt-2 text-xs text-[#a06a12]">
+        <p className="mt-1 text-xs text-[#a06a12]">
           所属が未設定の人が {now.unassigned} 名います。
           <Link href="/org" className="ml-1 text-[#2563eb] hover:underline">
             組織図で確認する

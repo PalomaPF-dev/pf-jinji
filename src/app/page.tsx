@@ -113,7 +113,7 @@ export default async function HomePage() {
         </h2>
         <p className="mb-3 text-xs text-[#707070]">
           本日時点で籍のある人数です（休職・出向も数えています。退職者は含みません）。
-          行を開くと室・職場ごとの内訳が出ます。
+          列は組織図の第2〜第4階層に対応しています。
         </p>
         <HeadcountNowTable now={headcount} />
       </section>
