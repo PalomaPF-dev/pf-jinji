@@ -141,12 +141,17 @@ export async function headcountByOrg(opts: {
     if (b.sortCode) return 1;
     return a.name.localeCompare(b.name, "ja");
   };
-  const sortTree = (n: Node) => {
-    n.children.sort(compare);
-    n.children.forEach(sortTree);
+  // 第2階層だけは「部が先、工場が後」。コードは工場（12xx）が部（13xx）より
+  // 若いので、コード順に任せると工場が上に来てしまう。組織図と揃える。
+  const isFactory = (n: Node) => /工場$/.test(n.name.replace(/[\s　]+/g, ""));
+  const compareTop = (a: Node, b: Node): number =>
+    (isFactory(a) ? 1 : 0) - (isFactory(b) ? 1 : 0) || compare(a, b);
+  const sortTree = (n: Node, depth: number) => {
+    n.children.sort(depth === 0 ? compareTop : compare);
+    n.children.forEach((c) => sortTree(c, depth + 1));
   };
   roots.sort(compare);
-  roots.forEach(sortTree);
+  roots.forEach((r) => sortTree(r, 0));
 
   const totalOf = (n: Node): number => n.own + n.children.reduce((s, c) => s + totalOf(c), 0);
 
