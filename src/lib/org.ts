@@ -281,10 +281,17 @@ async function isDescendantOrSelf(candidate: string, root: string): Promise<bool
  * 組織単位を削除する。
  *
  * 所属している社員が居る場合は消さない（所属不明の社員が生まれると人事マスターとして
- * 成立しないため）。配下の組織がある場合も消さない。FK は ON DELETE SET NULL なので
- * 消せてしまうが、配下が黙って「最上位」に浮き上がり、組織図が崩れたことに気づけない。
+ * 成立しないため）。
+ *
+ * 配下の組織があるときは既定で消さない。FK は ON DELETE SET NULL なので消せてしまうが、
+ * 配下が黙って「最上位」に浮き上がり、組織図が崩れたことに気づけないため。
+ * moveChildrenToParent を指定したときだけ、**配下を1つ上の組織へ引き上げてから**削除する
+ * （同じ名前の枠が二重にできてしまったときに、中身を残したまま片方を畳めるように）。
  */
-export async function deleteOrgUnit(id: string): Promise<void> {
+export async function deleteOrgUnit(
+  id: string,
+  opts: { moveChildrenToParent?: boolean } = {},
+): Promise<void> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql`SELECT count(*)::int AS n FROM jinji_employees WHERE org_unit_id = ${id}`;
@@ -293,9 +300,15 @@ export async function deleteOrgUnit(id: string): Promise<void> {
   }
   const kids = await sql`SELECT count(*)::int AS n FROM jinji_org_units WHERE parent_id = ${id}`;
   if ((kids[0]?.n as number) > 0) {
-    throw new Error(
-      `この組織には配下の組織が ${kids[0].n} 件あります。先に配下を別の組織へ移すか削除してください。`,
-    );
+    if (!opts.moveChildrenToParent) {
+      throw new Error(
+        `この組織には配下の組織が ${kids[0].n} 件あります。` +
+          `「配下を上へ移して削除」を使うか、先に配下を別の組織へ移してください。`,
+      );
+    }
+    const self = await sql`SELECT parent_id FROM jinji_org_units WHERE id = ${id} LIMIT 1`;
+    const parentId = (self[0]?.parent_id as string | null) ?? null;
+    await sql`UPDATE jinji_org_units SET parent_id = ${parentId}, updated_at = NOW() WHERE parent_id = ${id}`;
   }
   await sql`DELETE FROM jinji_org_units WHERE id = ${id}`;
 }

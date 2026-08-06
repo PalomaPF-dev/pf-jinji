@@ -139,15 +139,19 @@ export async function updateOrgUnitAction(_prev: OrgActionState, form: FormData)
   return { message: `「${input.name}」を更新しました。` };
 }
 
-/** 組織単位の削除。所属者が居るときは lib 側で弾かれる。 */
+/**
+ * 組織単位の削除。所属者が居るときは lib 側で弾かれる。
+ * moveChildren を送ると、配下の組織を1つ上へ引き上げてから削除する。
+ */
 export async function deleteOrgUnitAction(_prev: OrgActionState, form: FormData): Promise<OrgActionState> {
   const s = await assertJinjiSession();
   const id = str(form, "id");
+  const moveChildren = str(form, "moveChildren") === "1";
   const target = await getOrgUnit(id);
   if (!target) return { error: "対象が見つかりません。" };
 
   try {
-    await deleteOrgUnit(id);
+    await deleteOrgUnit(id, { moveChildrenToParent: moveChildren });
   } catch (e) {
     return { error: (e as Error).message };
   }
@@ -159,7 +163,7 @@ export async function deleteOrgUnitAction(_prev: OrgActionState, form: FormData)
     targetType: "org_unit",
     targetId: id,
     targetLabel: `${target.code} ${target.name}`,
-    detail: { event: "delete" },
+    detail: { event: "delete", movedChildren: moveChildren },
   });
   revalidatePath("/org");
   revalidatePath("/org/edit");
