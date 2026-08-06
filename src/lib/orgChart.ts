@@ -133,7 +133,7 @@ export function dutyRank(dutyName: string | null): number {
 }
 
 /** 親の枠へ統合する組織か（「大口工場長」「大口工場長代理」「同名の部」など）。 */
-function mergesIntoParent(parentName: string, childName: string): boolean {
+export function mergesIntoParent(parentName: string, childName: string): boolean {
   const p = normalizeOrgName(parentName);
   const c = normalizeOrgName(childName);
   if (!p || !c) return false;
