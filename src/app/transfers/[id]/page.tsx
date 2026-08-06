@@ -59,6 +59,15 @@ export default async function TransferDetailPage({ params }: { params: Promise<{
                 別紙をExcelで出力
               </a>
             )}
+            {/* 指定帳票そのもの。印刷レイアウトはどうしても寸法がずれるので、
+                原紙のExcelに値を差し込んだものを本命の出力にしている */}
+            <a
+              href={`/transfers/${t.id}/xlsx`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              申請書をExcelで出力
+            </a>
             <Link
               href={`/transfers/${t.id}/print`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
