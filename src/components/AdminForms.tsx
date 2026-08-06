@@ -7,6 +7,7 @@ import SubmitButton from "./SubmitButton";
 import {
   clearAuditLogsAction,
   issueLinkAction,
+  resetHrDataAction,
   removeAdminAction,
   upsertAdminAction,
   type SettingsActionState,
@@ -179,6 +180,65 @@ function ClearButton({ count }: { count: number }) {
     >
       <Trash2 className="h-3.5 w-3.5" />
       監査ログをすべて削除
+    </button>
+  );
+}
+
+/**
+ * 人事データの初期化。名簿を取り込み直すときに使う。
+ *
+ * 取り消せない操作なので、確認の言葉を打ってもらう。ボタンだけだと押し間違いが
+ * 起きるうえ、何が消えるかを読まずに実行されてしまうため。
+ */
+export function ResetHrDataForm({ employees, orgUnits }: { employees: number; orgUnits: number }) {
+  const [state, formAction] = useActionState(resetHrDataAction, {} as SettingsActionState);
+  return (
+    <form action={formAction} className="rounded-xl border border-[#f0d0d0] bg-[#fdf5f5] p-5">
+      <h3 className="mb-1 text-sm font-bold text-[#b91c1c]">人事データを初期化する</h3>
+      <p className="mb-3 text-xs text-[#8a5050]">
+        <strong>社員台帳 {employees} 件</strong>と<strong>組織 {orgUnits} 件</strong>、
+        それにぶら下がる異動申請・継続雇用申請・人事考課・基本給与・保有資格・異動案を
+        すべて削除します。名簿を取り込み直すときに使ってください。
+        <br />
+        利用許可名簿・資格マスター・考課項目・監査ログ・ログイン情報は残ります。
+        <strong>取り消せません。</strong>
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          name="confirm"
+          placeholder="削除する"
+          aria-label="確認の言葉"
+          className="w-40 rounded-lg border border-[#e0c0c0] bg-white px-3 py-1.5 text-sm outline-none focus:border-[#b91c1c]"
+        />
+        <ResetButton />
+        {state.error && <span className="text-xs text-[#b91c1c]">{state.error}</span>}
+      </div>
+      {state.message && (
+        <p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm text-[#1c7a4d]">{state.message}</p>
+      )}
+    </form>
+  );
+}
+
+function ResetButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      onClick={(e) => {
+        if (
+          !window.confirm(
+            "社員台帳と組織をすべて削除します。取り消せません。本当に実行しますか？",
+          )
+        ) {
+          e.preventDefault();
+        }
+      }}
+      className="inline-flex items-center gap-1 rounded-lg bg-[#b91c1c] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#991b1b] disabled:opacity-50"
+    >
+      <Trash2 className="h-4 w-4" />
+      初期化する
     </button>
   );
 }
