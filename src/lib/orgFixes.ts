@@ -94,19 +94,31 @@ export async function applyChotatsuStructure(sql: any): Promise<OrgFixResult> {
   if (!chotatsuId) return out;
   const chotatsu = byId.get(chotatsuId);
 
-  /** 職場コードで探し、無ければ作る。 */
+  /**
+   * 職場コード（無ければ組織コード）で探し、名前と階層を整える。無ければ作る。
+   *
+   * ここで名前まで直すのが肝。既存の枠を使い回すだけだと、名前が親と同じ
+   * （「調達部」のまま）のときに配置表が親の枠へ畳んでしまい、人は入っているのに
+   * グループの枠が見えない、という状態になる。
+   */
   const ensureOrg = async (code: string, parentId: string): Promise<string> => {
-    const found = byWp.get(code);
-    if (found) return found.id as string;
+    const found =
+      byWp.get(code) ?? (units as any[]).find((u) => (u.code as string) === code) ?? null;
+    if (found) {
+      await sql`
+        UPDATE jinji_org_units
+        SET name = ${NAME_OF[code]}, parent_id = ${parentId}, workplace_code = ${code},
+            dept_code = COALESCE(dept_code, ${chotatsu?.dept_code ?? null}), updated_at = NOW()
+        WHERE id = ${found.id}`;
+      byWp.set(code, { id: found.id, workplace_code: code });
+      return found.id as string;
+    }
     const made = await sql`
       INSERT INTO jinji_org_units (parent_id, code, name, kind, workplace_code, dept_code)
       VALUES (${parentId}, ${code}, ${NAME_OF[code]}, ${"ka"}, ${code}, ${chotatsu?.dept_code ?? null})
-      ON CONFLICT (code) DO NOTHING
       RETURNING id`;
-    const id =
-      (made[0]?.id as string | undefined) ??
-      ((await sql`SELECT id FROM jinji_org_units WHERE code = ${code} LIMIT 1`)[0]?.id as string);
-    if (made[0]) out.created++;
+    const id = made[0]?.id as string;
+    out.created++;
     byWp.set(code, { id, workplace_code: code });
     return id;
   };
