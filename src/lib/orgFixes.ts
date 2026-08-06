@@ -1,93 +1,140 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * 一度だけ当てる組織の整備。
+ * 一度だけ当てる組織の整備（調達部）。
  *
- * 人事マスタの名簿は「調達部 調達室 企画ｸﾞﾙｰﾌﾟ」のように、階層を名前に畳み込んで
- * 持っている。そのまま取り込むと調達部の直下に長い名前の枠が2つ並び、
- * 実態（調達部 → 調達室 → 各グループ）と組織図が食い違う。
+ * 実態はこの形なのに、本番では 14 名が調達部と調達室に直接ぶら下がっていて、
+ * 企画グループ・管理グループの組織そのものが無い。
  *
  *   調達部
- *   └ 調達室            … 室長
- *      ├ 企画グループ
- *      └ 管理グループ
+ *   └ 調達室 13361000        … 谷口 慶治（室長）
+ *      ├ 企画グループ 13361500 … 5名
+ *      └ 管理グループ 13361600 … 8名
  *
- * 画面（配置表の編集）からも同じことはできるが、本番の組織図を実態に合わせる
- * ところまでを持っていきたいので、版を上げた最初の1回だけここで直す。
+ * そこで **組織を用意し、社員番号で一人ずつ割り当てる**。
+ * 割り当ての内容は人事マスタ（階層＋承認者のExcel）の所属組織コードそのもの。
  *
- * 突合は**職場コード**で行う（名前は直す対象なので鍵にできない）。
- * すでに直っていれば何もしない。人が別の形に整えていたらそれを壊さない。
+ * 安全のための条件:
+ *   - 割り当てるのは、その人が**今も調達部の配下に居るとき**だけ。
+ *     別の部署へ異動していたら触らない（過去の整備が現在の人事を上書きしない）。
+ *   - 組織は職場コードで探し、無いときだけ作る。名前が変えられていても壊さない。
+ *   - 何度流しても同じ結果になる。
  */
 
+const SHITSU = "13361000"; // 調達室
 const KIKAKU = "13361500"; // 企画グループ
 const KANRI = "13361600"; // 管理グループ
-const SHITSU = "13361000"; // 調達室（新設。人事マスタに番号が無いので調達部の系列で振る）
-const SHITSUCHO = "014272"; // 谷口 慶治（室長）。調達室付けにする
+
+/** 社員番号 → 落ち着き先の職場コード。人事マスタの所属組織コードそのまま。 */
+const PLACEMENT: Record<string, string> = {
+  "014272": SHITSU, // 谷口 慶治（係長・室長）
+  "005142": KIKAKU, // 角田 一穂（課長）
+  "007858": KIKAKU, // 町野 真一（係長）
+  "010019": KIKAKU, // 近藤 三奈（係長心得）
+  "014433": KIKAKU, // 伊藤 直史（主任）
+  "016142": KIKAKU, // 髙橋 彩佳（一般）
+  "012230": KANRI, // 一柳 絵美（課長心得・グループ長）
+  "016102": KANRI, // 下久保 真希子（係長心得）
+  "011599": KANRI, // 窪田 敦史（主任）
+  "010007": KANRI, // 杉浦 慎二（主任）
+  "014881": KANRI, // 大川 颯太（主任）
+  "013611": KANRI, // 後藤 美咲（主任代理）
+  "011297": KANRI, // 山北 裕香（主任代理）
+  "015381": KANRI, // 近藤 友基（一般）
+};
+
+const NAME_OF: Record<string, string> = {
+  [SHITSU]: "調達室",
+  [KIKAKU]: "企画グループ",
+  [KANRI]: "管理グループ",
+};
 
 export interface OrgFixResult {
   created: number;
-  moved: number;
-  renamed: number;
   peopleMoved: number;
 }
 
 /** 調達部の階層を実態（調達部 → 調達室 → 企画/管理グループ）に合わせる。 */
 export async function applyChotatsuStructure(sql: any): Promise<OrgFixResult> {
-  const out: OrgFixResult = { created: 0, moved: 0, renamed: 0, peopleMoved: 0 };
+  const out: OrgFixResult = { created: 0, peopleMoved: 0 };
 
-  const groups = await sql`
-    SELECT id, name, parent_id, workplace_code
-    FROM jinji_org_units
-    WHERE workplace_code IN (${KIKAKU}, ${KANRI})`;
-  if (groups.length === 0) return out; // このデータには無い（開発環境など）
+  // 対象の14名が今どこに居るか。1人でも居なければ、このデータには関係がない
+  const nos = Object.keys(PLACEMENT);
+  const people = await sql`
+    SELECT e.id, e.employee_no, e.org_unit_id
+    FROM jinji_employees e WHERE e.employee_no = ANY(${nos})`;
+  if (people.length === 0) return out;
 
-  // 直す対象が残っているか。名前が既に短ければ、人が整えたあとなので触らない
-  const stale = groups.filter((g: any) => /調達室/.test(g.name as string));
-  if (stale.length === 0) return out;
+  // 「調達部」は、本部の直下にあって配下に人が居るほう（ポータル同期由来の空の枠は選ばない）
+  const units = await sql`SELECT id, parent_id, name, code, workplace_code, dept_code FROM jinji_org_units`;
+  const byId = new Map<string, any>(units.map((u: any) => [u.id as string, u]));
+  const byWp = new Map<string, any>();
+  for (const u of units as any[]) if (u.workplace_code) byWp.set(u.workplace_code as string, u);
 
-  // 調達部（＝グループたちの現在の親）。ここに調達室をぶら下げる
-  const parentId = (stale[0].parent_id as string | null) ?? null;
-  if (!parentId) return out;
+  /** その組織が属する、本部直下の部署 */
+  const deptOf = (orgId: string | null): any => {
+    let u = orgId ? byId.get(orgId) : null;
+    if (!u || !u.parent_id) return null;
+    for (let i = 0; i < 20 && u; i++) {
+      const p = u.parent_id ? byId.get(u.parent_id as string) : null;
+      if (!p || !p.parent_id) return u;
+      u = p;
+    }
+    return null;
+  };
 
-  let shitsu = (
-    await sql`SELECT id FROM jinji_org_units WHERE workplace_code = ${SHITSU} OR name = ${"調達室"} LIMIT 1`
-  )[0]?.id as string | undefined;
+  // 14名の現在地から調達部を割り出す（名前ではなく実際の所属から辿るので、
+  // 同名の枠が複数あっても取り違えない）
+  const deptVotes = new Map<string, number>();
+  for (const p of people as any[]) {
+    const d = deptOf((p.org_unit_id as string | null) ?? null);
+    if (d) deptVotes.set(d.id as string, (deptVotes.get(d.id as string) ?? 0) + 1);
+  }
+  const chotatsuId = [...deptVotes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!chotatsuId) return out;
+  const chotatsu = byId.get(chotatsuId);
 
-  if (!shitsu) {
+  /** 職場コードで探し、無ければ作る。 */
+  const ensureOrg = async (code: string, parentId: string): Promise<string> => {
+    const found = byWp.get(code);
+    if (found) return found.id as string;
     const made = await sql`
       INSERT INTO jinji_org_units (parent_id, code, name, kind, workplace_code, dept_code)
-      SELECT ${parentId}, ${SHITSU}, ${"調達室"}, ${"ka"}, ${SHITSU}, dept_code
-      FROM jinji_org_units WHERE id = ${parentId}
+      VALUES (${parentId}, ${code}, ${NAME_OF[code]}, ${"ka"}, ${code}, ${chotatsu?.dept_code ?? null})
+      ON CONFLICT (code) DO NOTHING
       RETURNING id`;
-    shitsu = made[0]?.id as string;
-    out.created = 1;
-  }
-  if (!shitsu) return out;
+    const id =
+      (made[0]?.id as string | undefined) ??
+      ((await sql`SELECT id FROM jinji_org_units WHERE code = ${code} LIMIT 1`)[0]?.id as string);
+    if (made[0]) out.created++;
+    byWp.set(code, { id, workplace_code: code });
+    return id;
+  };
 
-  for (const [code, name] of [
-    [KIKAKU, "企画グループ"],
-    [KANRI, "管理グループ"],
-  ] as const) {
+  const shitsuId = await ensureOrg(SHITSU, chotatsuId);
+  const orgIdByCode: Record<string, string> = {
+    [SHITSU]: shitsuId,
+    [KIKAKU]: await ensureOrg(KIKAKU, shitsuId),
+    [KANRI]: await ensureOrg(KANRI, shitsuId),
+  };
+
+  // 割り当て。今も調達部の配下に居る人だけ動かす
+  const targets: { id: string; org: string }[] = [];
+  for (const p of people as any[]) {
+    const now = (p.org_unit_id as string | null) ?? null;
+    const dept = deptOf(now);
+    if (!dept || dept.id !== chotatsuId) continue; // 別の部署へ移っていたら触らない
+    const want = orgIdByCode[PLACEMENT[p.employee_no as string]];
+    if (!want || want === now) continue;
+    targets.push({ id: p.id as string, org: want });
+  }
+  if (targets.length > 0) {
     const done = await sql`
-      UPDATE jinji_org_units
-      SET name = ${name}, parent_id = ${shitsu}, updated_at = NOW()
-      WHERE workplace_code = ${code} AND name LIKE ${"%調達室%"}
-      RETURNING id`;
-    if (done.length > 0) {
-      out.renamed += done.length;
-      out.moved += done.length;
-    }
+      UPDATE jinji_employees e SET org_unit_id = v.org, updated_at = NOW()
+      FROM unnest(${targets.map((t) => t.id)}::uuid[], ${targets.map((t) => t.org)}::uuid[]) AS v(id, org)
+      WHERE e.id = v.id
+      RETURNING e.id`;
+    out.peopleMoved = done.length;
   }
-
-  // 室長は調達室付け。グループに居るときだけ動かす（別の所属に変わっていたら触らない）
-  const person = await sql`
-    UPDATE jinji_employees e SET org_unit_id = ${shitsu}, updated_at = NOW()
-    FROM jinji_org_units o
-    WHERE o.id = e.org_unit_id
-      AND e.employee_no = ${SHITSUCHO}
-      AND o.workplace_code IN (${KIKAKU}, ${KANRI})
-    RETURNING e.id`;
-  out.peopleMoved = person.length;
-
   return out;
 }
