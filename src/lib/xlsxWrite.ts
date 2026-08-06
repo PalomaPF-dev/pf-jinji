@@ -38,7 +38,7 @@ function crc32(buf: Buffer): number {
 
 // ===== ZIP（deflate 固定・データディスクリプタなし） =====
 
-function zip(files: { path: string; data: Buffer }[]): Buffer {
+export function zip(files: { path: string; data: Buffer }[]): Buffer {
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;

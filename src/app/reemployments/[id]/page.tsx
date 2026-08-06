@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Pencil, Printer } from "lucide-react";
+import { FileSpreadsheet, Pencil, Printer } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getReemployment, listReemploymentApprovals } from "@/lib/reemployments";
 import { getEmployee } from "@/lib/employees";
@@ -52,6 +52,14 @@ export default async function ReemploymentDetailPage({
         backLabel="一覧へ戻る"
         actions={
           <>
+            {/* 指定帳票そのもの。原紙のExcelに値を差し込んだものを本命の出力にしている */}
+            <a
+              href={`/reemployments/${r.id}/xlsx`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              申請書をExcelで出力
+            </a>
             <Link
               href={`/reemployments/${r.id}/print`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
