@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Hash } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import {
   activeOn,
@@ -52,6 +53,15 @@ export default async function OrgEditPage({
         description="本部→部→課→係の階層と、組織の長を設定します。"
         backHref="/org"
         backLabel="組織図へ戻る"
+        actions={
+          <Link
+            href="/org/codes"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
+          >
+            <Hash className="h-4 w-4" />
+            部署・職場コードの設定
+          </Link>
+        }
       />
 
       <div className="space-y-5">

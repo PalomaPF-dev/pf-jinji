@@ -190,16 +190,43 @@ export interface OrgUnitInput {
   description: string | null;
   validFrom: string | null;
   validTo: string | null;
+  /** 人事マスタの部署コード（工場・部のグループ） */
+  deptCode?: string | null;
+  /** 人事マスタの職場コード（所属組織コード・8桁）。ポータル連携の突合キー */
+  workplaceCode?: string | null;
+}
+
+/**
+ * コードの重複を弾く。
+ *
+ * 組織コード（code）は DB のユニーク制約が守るが、職場コードはポータル連携の
+ * 突合キーになるので、ここで重ならないことを確かめる。重複したまま連携すると
+ * ポータルの職場が1つに潰れる。
+ */
+async function assertCodesFree(input: OrgUnitInput, selfId: string | null): Promise<void> {
+  const sql = getSql();
+  const dup = await sql`
+    SELECT name FROM jinji_org_units
+    WHERE (code = ${input.code}
+           OR (${input.workplaceCode ?? null}::text IS NOT NULL AND workplace_code = ${input.workplaceCode ?? null}))
+      AND (${selfId}::uuid IS NULL OR id <> ${selfId})
+    LIMIT 1`;
+  if (dup[0]) {
+    throw new Error(`同じコードの組織「${dup[0].name}」があります。コードは組織ごとに違う値にしてください。`);
+  }
 }
 
 export async function createOrgUnit(input: OrgUnitInput): Promise<string> {
   await ensureSchema();
+  await assertCodesFree(input, null);
   const sql = getSql();
   const rows = await sql`
     INSERT INTO jinji_org_units
-      (parent_id, code, name, kind, sort, head_employee_id, description, valid_from, valid_to)
+      (parent_id, code, name, kind, sort, head_employee_id, description, valid_from, valid_to,
+       dept_code, workplace_code)
     VALUES (${input.parentId}, ${input.code}, ${input.name}, ${input.kind}, ${input.sort},
-            ${input.headEmployeeId}, ${input.description}, ${input.validFrom}, ${input.validTo})
+            ${input.headEmployeeId}, ${input.description}, ${input.validFrom}, ${input.validTo},
+            ${input.deptCode ?? null}, ${input.workplaceCode ?? null})
     RETURNING id`;
   return rows[0].id as string;
 }
@@ -213,6 +240,7 @@ export async function updateOrgUnit(id: string, input: OrgUnitInput): Promise<vo
   if (input.parentId && (await isDescendantOrSelf(input.parentId, id))) {
     throw new Error("自分自身や配下の組織を上位組織には指定できません。");
   }
+  await assertCodesFree(input, id);
   const sql = getSql();
   await sql`
     UPDATE jinji_org_units SET
@@ -225,6 +253,8 @@ export async function updateOrgUnit(id: string, input: OrgUnitInput): Promise<vo
       description = ${input.description},
       valid_from = ${input.validFrom},
       valid_to = ${input.validTo},
+      dept_code = ${input.deptCode ?? null},
+      workplace_code = ${input.workplaceCode ?? null},
       updated_at = NOW()
     WHERE id = ${id}`;
 }
@@ -248,9 +278,11 @@ async function isDescendantOrSelf(candidate: string, root: string): Promise<bool
 }
 
 /**
- * 組織単位を削除する。所属している社員が居る場合は消さない
- * （所属不明の社員が生まれると人事マスターとして成立しないため）。
- * 子組織は FK の ON DELETE SET NULL により「未配置」として残る。
+ * 組織単位を削除する。
+ *
+ * 所属している社員が居る場合は消さない（所属不明の社員が生まれると人事マスターとして
+ * 成立しないため）。配下の組織がある場合も消さない。FK は ON DELETE SET NULL なので
+ * 消せてしまうが、配下が黙って「最上位」に浮き上がり、組織図が崩れたことに気づけない。
  */
 export async function deleteOrgUnit(id: string): Promise<void> {
   await ensureSchema();
@@ -258,6 +290,12 @@ export async function deleteOrgUnit(id: string): Promise<void> {
   const rows = await sql`SELECT count(*)::int AS n FROM jinji_employees WHERE org_unit_id = ${id}`;
   if ((rows[0]?.n as number) > 0) {
     throw new Error("この組織には所属者がいます。先に異動させてから削除してください。");
+  }
+  const kids = await sql`SELECT count(*)::int AS n FROM jinji_org_units WHERE parent_id = ${id}`;
+  if ((kids[0]?.n as number) > 0) {
+    throw new Error(
+      `この組織には配下の組織が ${kids[0].n} 件あります。先に配下を別の組織へ移すか削除してください。`,
+    );
   }
   await sql`DELETE FROM jinji_org_units WHERE id = ${id}`;
 }

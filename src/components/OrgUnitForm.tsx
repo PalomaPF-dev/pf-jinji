@@ -64,6 +64,31 @@ export default function OrgUnitForm({
           </label>
           <input id="name" name="name" required defaultValue={pick(v, "name", unit?.name)} className={INPUT} />
         </div>
+        {/* 人事システムの番号。ポータル連携の突合キーにもなる（一覧で直すなら /org/codes） */}
+        <div>
+          <label htmlFor="deptCode" className="mb-1 block text-sm font-medium text-[#555555]">
+            部署コード
+          </label>
+          <input
+            id="deptCode"
+            name="deptCode"
+            defaultValue={pick(v, "deptCode", unit?.deptCode ?? "")}
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#909090]">人事システムの部署（工場・部）の番号。</p>
+        </div>
+        <div>
+          <label htmlFor="workplaceCode" className="mb-1 block text-sm font-medium text-[#555555]">
+            職場コード
+          </label>
+          <input
+            id="workplaceCode"
+            name="workplaceCode"
+            defaultValue={pick(v, "workplaceCode", unit?.workplaceCode ?? "")}
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#909090]">所属組織コード（8桁）。ポータルの職場と結び付きます。</p>
+        </div>
         <div>
           <label htmlFor="kind" className="mb-1 block text-sm font-medium text-[#555555]">
             階層区分

@@ -41,10 +41,27 @@ function readOrgInput(form: FormData): OrgUnitInput {
     description: nullable(form, "description"),
     validFrom: nullable(form, "validFrom"),
     validTo: nullable(form, "validTo"),
+    deptCode: nullable(form, "deptCode"),
+    workplaceCode: nullable(form, "workplaceCode"),
   };
 }
 
+/** 部署コード・職場コードの書式。人事システムの8桁コードを想定しつつ緩めにしてある。 */
+const CODE_RE = /^[A-Za-z0-9_-]{1,20}$/;
+
+function validateCodes(input: OrgUnitInput): string | null {
+  if (input.deptCode && !CODE_RE.test(input.deptCode)) {
+    return "部署コードは半角英数字とハイフン・アンダースコア（20文字以内）で入力してください。";
+  }
+  if (input.workplaceCode && !CODE_RE.test(input.workplaceCode)) {
+    return "職場コードは半角英数字とハイフン・アンダースコア（20文字以内）で入力してください。";
+  }
+  return null;
+}
+
 function validate(input: OrgUnitInput): string | null {
+  const codes = validateCodes(input);
+  if (codes) return codes;
   if (!input.code) return "組織コードは必須です。";
   if (!/^[A-Za-z0-9_-]{1,20}$/.test(input.code)) {
     return "組織コードは半角英数字とハイフン・アンダースコア（20文字以内）で入力してください。";
@@ -83,6 +100,7 @@ export async function createOrgUnitAction(_prev: OrgActionState, form: FormData)
 
   revalidatePath("/org");
   revalidatePath("/org/edit");
+  revalidatePath("/org/codes");
   return { message: `「${input.name}」を追加しました。` };
 }
 
@@ -145,6 +163,7 @@ export async function deleteOrgUnitAction(_prev: OrgActionState, form: FormData)
   });
   revalidatePath("/org");
   revalidatePath("/org/edit");
+  revalidatePath("/org/codes");
   return { message: `「${target.name}」を削除しました。` };
 }
 
@@ -202,4 +221,63 @@ export async function syncPortalAction(_prev: OrgActionState): Promise<OrgAction
   } catch (e) {
     return { error: `同期に失敗しました: ${(e as Error).message}` };
   }
+}
+
+
+/**
+ * 部署コード・職場コードだけを直す（コードの設定画面の行ごとの保存）。
+ *
+ * 名称・階層は触らない。コードは人事システムの台帳とポータル連携の突合キーなので、
+ * ここだけを安全に直せるようにしてある。
+ */
+export async function updateOrgCodesAction(
+  _prev: OrgActionState,
+  form: FormData,
+): Promise<OrgActionState> {
+  const s = await assertJinjiSession();
+  const id = str(form, "id");
+  const before = await getOrgUnit(id);
+  if (!before) return { error: "対象が見つかりません。" };
+
+  const input: OrgUnitInput = {
+    code: before.code,
+    name: before.name,
+    kind: before.kind,
+    parentId: before.parentId,
+    sort: before.sort,
+    headEmployeeId: before.headEmployeeId,
+    description: before.description,
+    validFrom: before.validFrom,
+    validTo: before.validTo,
+    deptCode: nullable(form, "deptCode"),
+    workplaceCode: nullable(form, "workplaceCode"),
+  };
+  const problem = validateCodes(input);
+  if (problem) return { error: problem, values: formValues(form) };
+
+  try {
+    await updateOrgUnit(id, input);
+  } catch (e) {
+    return { error: (e as Error).message, values: formValues(form) };
+  }
+
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_org",
+    targetType: "org_unit",
+    targetId: id,
+    targetLabel: `${before.code} ${before.name}`,
+    detail: {
+      event: "codes",
+      deptCodeBefore: before.deptCode,
+      deptCodeAfter: input.deptCode,
+      workplaceCodeBefore: before.workplaceCode,
+      workplaceCodeAfter: input.workplaceCode,
+    },
+  });
+  revalidatePath("/org");
+  revalidatePath("/org/edit");
+  revalidatePath("/org/codes");
+  return { message: `「${before.name}」のコードを保存しました。` };
 }
