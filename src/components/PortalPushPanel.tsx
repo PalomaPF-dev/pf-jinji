@@ -41,8 +41,9 @@ function Button({
 /**
  * ポータルへの人事情報連携。
  *
- * 人事管理が「人」のマスターで、ポータルは「アカウント」のマスター。
- * ここから送るのは人事情報だけで、パスワード・アプリ権限・承認者は送らない。
+ * 人事管理が「人」と「組織」のマスター。ここから組織・人事情報・承認者を送る。
+ * パスワードとアプリの利用権限（role / can_manage / 部署の apps）はポータルが
+ * 持つ情報なので送らない。
  */
 export default function PortalPushPanel() {
   const [preview, previewAction] = useActionState(previewPortalPushAction, {} as PortalPushState);
@@ -53,12 +54,13 @@ export default function PortalPushPanel() {
     <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
       <h2 className="mb-1 text-sm font-bold text-[#333333]">ポータルへの人事情報連携</h2>
       <p className="mb-4 text-xs text-[#707070]">
-        この人事管理が持つ<strong>所属・役職・職務・生年月日・入社日・雇用体系・在籍状態</strong>を
-        ポータルへ送り、ポータル側の社員情報を最新にします。ポータルはこれを受けて各業務アプリへ
-        再連携するため、異動が各アプリの部署・権限にも反映されます。
+        この人事管理が持つ<strong>組織（部署・職場）・所属・役職・職務・入社日・雇用体系・在籍状態</strong>
+        と、社員ごとの<strong>管理者（承認者）</strong>・<strong>職場の長</strong>をポータルへ送り、
+        ポータル側を最新にします。ポータルはこれを受けて各業務アプリへ再連携するため、
+        異動が各アプリの部署にも反映されます。
         <br />
-        パスワード・アプリの利用権限・承認者は<strong>ポータルが持つ情報なので送りません</strong>
-        （上書きすると権限運用が壊れるため）。
+        パスワードとアプリの利用権限（ポータルの権限・部署へのアプリ割当）は
+        <strong>ポータルが持つ情報なので変更しません</strong>（上書きすると権限運用が壊れるため）。
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
