@@ -205,15 +205,18 @@ export default function OrgChartBoard({
                             {node.people.map((p) => (
                               <tr
                                 key={p.employeeId}
-                                draggable={canDrag}
+                                draggable={canDrag && !p.concurrent}
                                 onDragStart={() => setDragging(p)}
                                 onDragEnd={() => setDragging(null)}
                                 className={`${p.mark ? "bg-[#eaf3e8]" : ""} ${
-                                  canDrag ? "cursor-grab" : ""
-                                } border-b border-[#f0f0f0] last:border-0`}
+                                  p.concurrent ? "bg-[#fbfbfb] text-[#707070]" : ""
+                                } ${canDrag ? "cursor-grab" : ""} border-b border-[#f0f0f0] last:border-0`}
                               >
-                                <td className="w-5 px-1 py-0.5 text-center text-[#333]">
-                                  {p.mark ? SIGN[p.mark] : ""}
+                                <td
+                                  className="w-5 px-1 py-0.5 text-center text-[#333]"
+                                  title={p.concurrent ? "兼務（本務は別の組織）" : undefined}
+                                >
+                                  {p.concurrent ? "兼" : p.mark ? SIGN[p.mark] : ""}
                                 </td>
                                 <td className="w-[9em] border-r border-[#f0f0f0] px-1 py-0.5">
                                   <Link
@@ -433,12 +436,15 @@ function OrgCellHeader({
     );
   }
 
+  // 人数は本務だけを数える。兼務は「兼◯」として別に添える（二重に数えないため）
+  const home = node.people.filter((p) => !p.concurrent).length;
+  const kenmu = node.people.length - home;
+
   return (
     <div className="border-b border-[#e5e5e5] bg-[#fafafa] px-1.5 py-0.5 text-[11px] font-bold text-[#333]">
       {node.orgUnitName}
-      {node.people.length > 0 && (
-        <span className="ml-1 font-normal text-[#909090]">{node.people.length}名</span>
-      )}
+      {home > 0 && <span className="ml-1 font-normal text-[#909090]">{home}名</span>}
+      {kenmu > 0 && <span className="ml-1 font-normal text-[#909090]">兼{kenmu}</span>}
       {codes && <span className="ml-1 font-mono text-[10px] font-normal text-[#909090]">{codes}</span>}
       {orgEdit && (
         <button

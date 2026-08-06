@@ -197,7 +197,7 @@ export function ResetHrDataForm({ employees, orgUnits }: { employees: number; or
       <h3 className="mb-1 text-sm font-bold text-[#b91c1c]">人事データを初期化する</h3>
       <p className="mb-3 text-xs text-[#8a5050]">
         <strong>社員台帳 {employees} 件</strong>と<strong>組織 {orgUnits} 件</strong>、
-        それにぶら下がる異動申請・継続雇用申請・人事考課・基本給与・保有資格・異動案を
+        それにぶら下がる異動申請・継続雇用申請・人事考課・基本給与・保有資格・兼務・異動案を
         すべて削除します。名簿を取り込み直すときに使ってください。
         <br />
         利用許可名簿・資格マスター・考課項目・監査ログ・ログイン情報は残ります。

@@ -30,7 +30,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -77,6 +77,7 @@ async function recordSchemaVersion(): Promise<void> {
  * - jinji_evaluations       … 人事考課
  * - jinji_salaries          … 基本給与（履歴型）
  * - jinji_qualification_master / jinji_qualifications … 資格マスターと保有資格
+ * - jinji_concurrent_posts  … 兼務（本務とは別のもう一つの所属）
  * - jinji_audit_logs        … 監査ログ（給与・考課は閲覧も記録する）
  * - jinji_counters          … 異動申請番号の年度連番
  *
@@ -496,6 +497,28 @@ async function buildSchema(): Promise<void> {
     )`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_emp_idx ON jinji_qualifications(employee_id)`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_expiry_idx ON jinji_qualifications(expires_on)`);
+
+  // ===== 兼務 =====
+  // 本務（jinji_employees.org_unit_id）とは別に持つ「もう一つの所属」。
+  // 名簿は1人1所属しか持てないので、兼務は人事側で足す。
+  // 本務と混ぜないため別テーブルにする（人数の二重計上を避けるのと、
+  // 名簿を取り込み直しても兼務が消えないようにするため）。
+  await safeDdl(() => sql`
+    CREATE TABLE IF NOT EXISTS jinji_concurrent_posts (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id    UUID NOT NULL REFERENCES jinji_employees(id) ON DELETE CASCADE,
+      org_unit_id    UUID NOT NULL REFERENCES jinji_org_units(id) ON DELETE CASCADE,
+      position_name  TEXT,
+      duty_name      TEXT,
+      started_on     DATE,
+      ended_on       DATE,
+      note           TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      -- 同じ人を同じ組織へ二重に兼務させない
+      UNIQUE (employee_id, org_unit_id)
+    )`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_concurrent_posts_emp_idx ON jinji_concurrent_posts(employee_id)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_concurrent_posts_org_idx ON jinji_concurrent_posts(org_unit_id)`);
 
   // ===== 監査ログ =====
   // 人事情報は機微なため、給与・考課は「閲覧」も記録する。

@@ -4,10 +4,14 @@ import { Pencil } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope, inScope } from "@/lib/scope";
 import { getEmployee } from "@/lib/employees";
+import { listConcurrentPosts } from "@/lib/concurrentPosts";
+import { activeOn, buildOrgTree, flattenTree, listOrgUnits } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
 import { ageAt, formatDate, tenureAt } from "@/lib/format";
 import { EmploymentStatusBadge } from "@/components/Badges";
 import PageHeader from "@/components/PageHeader";
+import ConcurrentPostForm from "@/components/ConcurrentPostForm";
+import EmployeeDeleteForm from "@/components/EmployeeDeleteForm";
 import { GENDER_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +51,12 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const scope = await getScope(s.grant);
   if (!inScope(scope, e.orgUnitId)) notFound();
   const today = todayJST();
+
+  // 兼務。本務とは別の所属なので、ここで足し引きできるようにする
+  const [posts, orgUnits] = await Promise.all([listConcurrentPosts(e.id), listOrgUnits()]);
+  const orgOptions = flattenTree(
+    buildOrgTree(activeOn(orgUnits, today), new Map(), new Map()),
+  ).filter((o) => scope.orgUnitIds === null || scope.orgUnitIds.includes(o.id));
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -108,6 +118,20 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </p>
         </section>
 
+        <section className="rounded-xl border border-[#e5e5e5] bg-white p-5 md:col-span-2">
+          <h2 className="mb-1 text-sm font-bold text-[#333333]">兼務</h2>
+          <p className="mb-3 text-xs text-[#707070]">
+            本務（所属）のほかに持っている所属です。名簿の取込では変わりません。
+            組織図の配置表には<strong>「兼」</strong>を付けて出ます。人数には数えません（二重に数えないため）。
+          </p>
+          <ConcurrentPostForm
+            employeeId={e.id}
+            homeOrgName={e.orgUnitName ?? null}
+            posts={posts}
+            orgOptions={orgOptions}
+          />
+        </section>
+
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
           <h2 className="mb-3 text-sm font-bold text-[#333333]">連絡先</h2>
           <dl>
@@ -151,6 +175,13 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           </div>
         </section>
       </div>
+
+      {/* 削除は取り消せないので、いちばん下に置く。ポータル管理者だけに出す */}
+      {s.grant.isOwner && (
+        <div className="mt-5">
+          <EmployeeDeleteForm id={e.id} employeeNo={e.employeeNo} name={e.name} />
+        </div>
+      )}
     </div>
   );
 }

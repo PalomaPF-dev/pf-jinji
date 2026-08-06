@@ -47,7 +47,13 @@ function OrgCard({ node }: { node: OrgNode }) {
         <span className="font-medium text-[#333333]">{node.name}</span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[#909090]">
-        <span className="font-mono">{node.code}</span>
+        {/*
+          人事システムのコード。部署コード（工場・部の識別子）と
+          職場コード（所属組織の8桁）を出す。どちらも無い組織は内部コードを出す。
+        */}
+        {node.deptCode && <span className="font-mono">部署 {node.deptCode}</span>}
+        {node.workplaceCode && <span className="font-mono">職場 {node.workplaceCode}</span>}
+        {!node.deptCode && !node.workplaceCode && <span className="font-mono">{node.code}</span>}
         <span>
           長: {node.headName ? (
             <span className="text-[#555555]">{node.headName}</span>

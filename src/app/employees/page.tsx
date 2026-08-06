@@ -3,6 +3,7 @@ import { Download, Plus, Upload } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
 import { listEmployeesPage, normalizeEmployeeSort, type EmployeeSortKey } from "@/lib/employees";
+import { employeeIdsWithConcurrentPost } from "@/lib/concurrentPosts";
 import { activeOn, buildOrgTree, flattenTree, listOrgUnits, memberCountsByOrg } from "@/lib/org";
 import { todayJST } from "@/lib/dates";
 import { ageAt, formatDate } from "@/lib/format";
@@ -130,7 +131,7 @@ export default async function EmployeesPage({
   // 並び替え・絞り込みを変えたら1ページ目に戻す（page は引き継がない）
   const sortProps = { sort, desc, params: { q, org, status } };
 
-  const [list, orgUnits, counts] = await Promise.all([
+  const [list, orgUnits, counts, kenmu] = await Promise.all([
     listEmployeesPage({
       q,
       orgUnitId: org || null,
@@ -142,6 +143,7 @@ export default async function EmployeesPage({
     }),
     listOrgUnits(),
     memberCountsByOrg(),
+    employeeIdsWithConcurrentPost(),
   ]);
   const employees = list.items;
   const orgOptions = flattenTree(buildOrgTree(activeOn(orgUnits, today), counts, new Map())).filter(
@@ -282,7 +284,18 @@ export default async function EmployeesPage({
                     </Link>
                     {e.nameKana && <span className="ml-2 text-xs text-[#909090]">{e.nameKana}</span>}
                   </td>
-                  <td className="px-3 py-1 text-[#555555]">{e.orgUnitName ?? "（未配置）"}</td>
+                  <td className="px-3 py-1 text-[#555555]">
+                    {e.orgUnitName ?? "（未配置）"}
+                    {/* 兼務がある人。所属欄が「本務だけ」に見えないよう印を添える */}
+                    {kenmu.has(e.id) && (
+                      <span
+                        title="兼務あり（社員カードで見られます）"
+                        className="ml-1.5 rounded border border-[#c8d8f5] bg-[#eff6ff] px-1 text-[10px] text-[#1d4ed8]"
+                      >
+                        兼
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-1 text-[#555555]">{e.positionName ?? "—"}</td>
                   <td className="px-3 py-1 text-[#555555]">{e.dutyName ?? "—"}</td>
                   <td className="px-3 py-1 whitespace-nowrap text-[#707070]">{formatDate(e.hireDate)}</td>
