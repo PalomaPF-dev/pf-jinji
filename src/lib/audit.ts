@@ -54,3 +54,17 @@ export async function listAuditLogs(limit = 200, action?: AuditAction | null): P
     createdAt: r.created_at ? new Date(r.created_at as string).toISOString() : null,
   }));
 }
+
+/**
+ * 監査ログを全件削除する。戻り値は消した件数。
+ *
+ * 取込を回すと1回で数百件の記録が積み上がるため、棚卸しのために消せるようにしてある。
+ * 「誰がいつ全部消したか」は分からなくなると困るので、呼び出し側で削除した旨を
+ * 1件だけ記録し直すこと（この関数はテーブルを空にするだけ）。
+ */
+export async function clearAuditLogs(): Promise<number> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql`DELETE FROM jinji_audit_logs RETURNING id`;
+  return rows.length;
+}

@@ -3,7 +3,15 @@
 import { useActionState, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { movePersonAction } from "@/app/org/plan/actions";
-import { updateOrgCodesAction, type OrgActionState } from "@/app/org/actions";
+import {
+  createOrgUnitAction,
+  deleteOrgUnitAction,
+  updateOrgCodesAction,
+  type OrgActionState,
+} from "@/app/org/actions";
+import { ORG_KIND_LABEL, ORG_KIND_ORDER } from "@/lib/types";
+
+/** 階層を変えるときの移動先の候補（本部・部署・職場のすべて）。 */
 import type { ChartNode, ChartPerson, OrgChartData } from "@/lib/orgChart";
 
 /** 階層を変えるときの移動先の候補（本部・部署・職場のすべて）。 */
@@ -275,14 +283,14 @@ function OrgCellHeader({
   onClose: () => void;
 }) {
   const [state, formAction] = useActionState(updateOrgCodesAction, {} as OrgActionState);
+  const [createState, createAction] = useActionState(createOrgUnitAction, {} as OrgActionState);
+  const [adding, setAdding] = useState(false);
   const codes = [node.deptCode, node.workplaceCode].filter(Boolean).join(" / ");
 
   if (orgEdit && editing) {
     return (
-      <form
-        action={formAction}
-        className="border-b border-[#2563eb] bg-[#eff6ff] p-1.5 text-[11px]"
-      >
+      <div className="border-b border-[#2563eb] bg-[#eff6ff] p-1.5 text-[11px]">
+      <form action={formAction}>
         <input type="hidden" name="id" value={node.orgUnitId} />
         <input
           name="name"
@@ -323,6 +331,34 @@ function OrgCellHeader({
               </option>
             ))}
         </select>
+        <div className="mb-1 flex gap-1">
+          <select
+            name="kind"
+            defaultValue={node.kind}
+            aria-label="区分"
+            className="w-1/2 rounded border border-[#c8d8f5] bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#2563eb]"
+          >
+            {ORG_KIND_ORDER.map((k) => (
+              <option key={k} value={k}>
+                {ORG_KIND_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          {/* 組織の長はこの枠に居る人から選ぶ（全社員を並べると重くなるうえ、実務でも枠の中の人） */}
+          <select
+            name="headEmployeeId"
+            defaultValue={node.headEmployeeId ?? ""}
+            aria-label="組織の長"
+            className="w-1/2 rounded border border-[#c8d8f5] bg-white px-1 py-0.5 text-[10px] outline-none focus:border-[#2563eb]"
+          >
+            <option value="">長は未設定</option>
+            {node.people.map((p) => (
+              <option key={p.employeeId} value={p.employeeId}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="submit"
@@ -337,6 +373,63 @@ function OrgCellHeader({
           {state.message && <span className="text-[10px] text-[#1c7a4d]">保存しました</span>}
         </div>
       </form>
+
+      {/* 配下に組織を足す・この組織を消す */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 border-t border-[#c8d8f5] pt-1.5">
+        <button
+          type="button"
+          onClick={() => setAdding((v) => !v)}
+          className="text-[10px] text-[#2563eb] hover:underline"
+        >
+          {adding ? "追加をやめる" : "＋ 配下に追加"}
+        </button>
+        <OrgDeleteInline
+          id={node.orgUnitId}
+          name={node.orgUnitName}
+          childCount={node.children.length}
+        />
+      </div>
+
+      {adding && (
+        <form action={createAction} className="mt-1.5 rounded border border-[#c8d8f5] bg-white p-1.5">
+          <input type="hidden" name="parentId" value={node.orgUnitId} />
+          {/* 区分は親の位置から決める。本部の直下なら部、その下なら課 */}
+          <input type="hidden" name="kind" value={node.depth === 0 ? "bu" : "ka"} />
+          <input
+            name="name"
+            required
+            placeholder="新しい組織の名称"
+            aria-label="新しい組織の名称"
+            className="mb-1 w-full rounded border border-[#e5e5e5] px-1 py-0.5 text-[11px] outline-none focus:border-[#2563eb]"
+          />
+          <div className="mb-1 flex gap-1">
+            <input
+              name="deptCode"
+              defaultValue={node.deptCode ?? ""}
+              placeholder="部署コード"
+              aria-label="新しい組織の部署コード"
+              className="w-1/2 rounded border border-[#e5e5e5] px-1 py-0.5 font-mono text-[10px] outline-none focus:border-[#2563eb]"
+            />
+            <input
+              name="workplaceCode"
+              placeholder="職場コード"
+              aria-label="新しい組織の職場コード"
+              className="w-1/2 rounded border border-[#e5e5e5] px-1 py-0.5 font-mono text-[10px] outline-none focus:border-[#2563eb]"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              className="rounded bg-[#2563eb] px-2 py-0.5 text-[10px] font-medium text-white hover:bg-[#1d4ed8]"
+            >
+              追加
+            </button>
+            {createState.error && <span className="text-[10px] text-[#b91c1c]">{createState.error}</span>}
+            {createState.message && <span className="text-[10px] text-[#1c7a4d]">追加しました</span>}
+          </div>
+        </form>
+      )}
+      </div>
     );
   }
 
@@ -357,5 +450,42 @@ function OrgCellHeader({
         </button>
       )}
     </div>
+  );
+}
+
+
+/**
+ * 枠の中からの削除。所属者がいれば拒否される。
+ * 配下があるときは1つ上へ引き上げてから消す（配下が黙って最上位に浮かないように）。
+ */
+function OrgDeleteInline({
+  id,
+  name,
+  childCount,
+}: {
+  id: string;
+  name: string;
+  childCount: number;
+}) {
+  const [state, formAction] = useActionState(deleteOrgUnitAction, {} as OrgActionState);
+  return (
+    <form action={formAction} className="inline-flex items-center gap-2">
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="moveChildren" value="1" />
+      <button
+        type="submit"
+        onClick={(e) => {
+          const msg =
+            childCount > 0
+              ? `「${name}」を削除し、配下の ${childCount} 件を1つ上の組織へ移します。よろしいですか？`
+              : `「${name}」を削除します。よろしいですか？`;
+          if (!window.confirm(msg)) e.preventDefault();
+        }}
+        className="text-[10px] text-[#b91c1c] hover:underline"
+      >
+        この組織を削除
+      </button>
+      {state.error && <span className="text-[10px] text-[#b91c1c]">{state.error}</span>}
+    </form>
   );
 }

@@ -186,11 +186,11 @@ export default async function HomePage() {
         <div className="mt-6 rounded-xl border border-dashed border-[#e5e5e5] bg-white p-6 text-center">
           <p className="font-medium text-[#555555]">まずは人事マスターを整えましょう</p>
           <p className="mt-1 text-sm text-[#909090]">
-            組織図でポータルの部署を取り込み、社員台帳にCSVで社員を登録すると使い始められます。
+            設定でポータルの部署を取り込み、社員台帳にCSV・Excelで社員を登録すると使い始められます。
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
-              href="/org/edit"
+              href="/org?edit=1"
               className="rounded-lg bg-[#2563eb] px-4 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
             >
               組織を設定する
