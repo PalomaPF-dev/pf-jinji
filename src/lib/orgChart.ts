@@ -126,7 +126,9 @@ export function positionRank(positionName: string | null): number {
  * 「温水多工程3級」のような**役職名でないもの**も入る。長で終わる肩書き
  * （＋マネージャー）だけを役職とみなし、それ以外は末尾に置く。
  */
-const DUTY_TITLE_RE = /(長|長代理|長心得|長付|マネージャー|ﾏﾈｰｼﾞｬｰ)$/;
+// 「取締役」は長で終わらないが役職名。入れておかないと 99（末尾）に落ちて、
+// 職務が「常務取締役」の人が「部門長」の人より下に並んでしまう。
+const DUTY_TITLE_RE = /(長|長代理|長心得|長付|取締役|マネージャー|ﾏﾈｰｼﾞｬｰ)$/;
 
 export function dutyRank(dutyName: string | null): number {
   let d = (dutyName ?? "").trim();
@@ -135,6 +137,11 @@ export function dutyRank(dutyName: string | null): number {
   d = d.replace(/[ 　]*[A-ZＡ-Ｚ]$/, "").trim(); // 「工場長A」→「工場長」
   if (!DUTY_TITLE_RE.test(d)) return 99;
   return positionRank(d);
+}
+
+/** 工場か（並びで部の後ろに置く）。「大口可児工場」のような配下の工場も含む。 */
+export function isFactoryOrg(name: string): boolean {
+  return /工場$/.test(name.replace(/[\s　]+/g, ""));
 }
 
 /** 親の枠へ統合する組織か（「大口工場長」「大口工場長代理」「同名の部」など）。 */
@@ -263,12 +270,19 @@ export async function buildOrgChart(
     if (b.sortCode) return 1;
     return a.orgUnitName.localeCompare(b.orgUnitName, "ja");
   };
-  const sortTree = (n: ChartNode) => {
-    n.children.sort(compareCode);
-    n.children.forEach(sortTree);
+  // 第2階層だけは「部が先、工場が後」。人事システムのコードは工場（12xx）が
+  // 部（13xx）より若いので、コード順に任せると工場が上に来てしまう。
+  // 帳票では部を上に置くため、ここだけ並びを分ける。
+  const compareTop = (a: ChartNode, b: ChartNode): number =>
+    (isFactoryOrg(a.orgUnitName) ? 1 : 0) - (isFactoryOrg(b.orgUnitName) ? 1 : 0) ||
+    compareCode(a, b);
+
+  const sortTree = (n: ChartNode, depth: number) => {
+    n.children.sort(depth === 0 ? compareTop : compareCode);
+    n.children.forEach((c) => sortTree(c, depth + 1));
   };
   roots.sort(compareCode);
-  roots.forEach(sortTree);
+  roots.forEach((r) => sortTree(r, 0));
 
   // 深さと行数を計算する
   let maxDepth = 0;

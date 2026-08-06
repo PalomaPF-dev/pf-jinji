@@ -92,8 +92,15 @@ export function buildOrgTree(
   // コードを持たない組織（配置表で人が足したもの）は sort → 名前 で後ろに置く。
   const codeOf = (n: OrgNode): string | null =>
     n.workplaceCode ?? n.deptCode ?? (/^\d+$/.test(n.code) ? n.code : null);
-  const sortNodes = (list: OrgNode[]) => {
+  // 第2階層だけは「部が先、工場が後」。コードは工場（12xx）が部（13xx）より
+  // 若いので、コード順に任せると工場が上に来てしまう。配置表と揃える。
+  const isFactory = (n: OrgNode) => /工場$/.test(n.name.replace(/[\s　]+/g, ""));
+  const sortNodes = (list: OrgNode[], depth: number) => {
     list.sort((a, b) => {
+      if (depth === 1) {
+        const d = (isFactory(a) ? 1 : 0) - (isFactory(b) ? 1 : 0);
+        if (d !== 0) return d;
+      }
       const ca = codeOf(a);
       const cb = codeOf(b);
       if (ca && cb) {
@@ -105,9 +112,9 @@ export function buildOrgTree(
       else if (cb) return 1;
       return a.sort - b.sort || a.name.localeCompare(b.name, "ja");
     });
-    for (const n of list) sortNodes(n.children);
+    for (const n of list) sortNodes(n.children, depth + 1);
   };
-  sortNodes(roots);
+  sortNodes(roots, 0);
 
   const visited = new Set<string>();
   const walk = (node: OrgNode, depth: number): number => {
