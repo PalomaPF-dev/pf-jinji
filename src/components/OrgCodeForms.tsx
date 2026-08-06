@@ -18,16 +18,18 @@ const INPUT_L =
   "w-full rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm outline-none focus:border-[#2563eb]";
 
 /**
- * 1行ぶんのコード編集。部署コードと職場コードだけを直す。
- * 名称や階層は「組織の編集」で扱うので、ここでは触らない
- * （コードの棚卸しをしているときに、うっかり階層を変えてしまわないように）。
+ * 1行ぶんの編集。組織名・部署コード・職場コードを直す。
+ * 階層（上位組織）と組織の長は「組織の編集」で扱うので、ここでは触らない
+ * （名称とコードの棚卸しをしているときに、うっかり階層を変えてしまわないように）。
  */
 export function OrgCodeRowForm({
   id,
+  name,
   deptCode,
   workplaceCode,
 }: {
   id: string;
+  name: string;
   deptCode: string | null;
   workplaceCode: string | null;
 }) {
@@ -36,6 +38,15 @@ export function OrgCodeRowForm({
   return (
     <form action={formAction} className="flex items-start gap-1.5">
       <input type="hidden" name="id" value={id} />
+      <span className="min-w-[180px] flex-1">
+        <input
+          name="name"
+          required
+          defaultValue={pick(v, "name", name)}
+          aria-label="組織名"
+          className="w-full rounded-lg border border-[#e5e5e5] bg-white px-2 py-1 text-[13px] outline-none focus:border-[#2563eb]"
+        />
+      </span>
       <span className="w-[110px]">
         <input
           name="deptCode"

@@ -225,10 +225,10 @@ export async function syncPortalAction(_prev: OrgActionState): Promise<OrgAction
 
 
 /**
- * 部署コード・職場コードだけを直す（コードの設定画面の行ごとの保存）。
+ * 組織名・部署コード・職場コードを直す（設定画面の行ごとの保存）。
  *
- * 名称・階層は触らない。コードは人事システムの台帳とポータル連携の突合キーなので、
- * ここだけを安全に直せるようにしてある。
+ * 階層と組織の長は触らない。名称とコードは人事システムの台帳・ポータル連携の
+ * 突合に使う値なので、ここだけを安全に直せるようにしてある。
  */
 export async function updateOrgCodesAction(
   _prev: OrgActionState,
@@ -239,9 +239,12 @@ export async function updateOrgCodesAction(
   const before = await getOrgUnit(id);
   if (!before) return { error: "対象が見つかりません。" };
 
+  const name = str(form, "name");
+  if (!name) return { error: "組織名は必須です。", values: formValues(form) };
+
   const input: OrgUnitInput = {
     code: before.code,
-    name: before.name,
+    name,
     kind: before.kind,
     parentId: before.parentId,
     sort: before.sort,
@@ -267,9 +270,11 @@ export async function updateOrgCodesAction(
     action: "update_org",
     targetType: "org_unit",
     targetId: id,
-    targetLabel: `${before.code} ${before.name}`,
+    targetLabel: `${before.code} ${name}`,
     detail: {
       event: "codes",
+      nameBefore: before.name,
+      nameAfter: name,
       deptCodeBefore: before.deptCode,
       deptCodeAfter: input.deptCode,
       workplaceCodeBefore: before.workplaceCode,
@@ -279,5 +284,10 @@ export async function updateOrgCodesAction(
   revalidatePath("/org");
   revalidatePath("/org/edit");
   revalidatePath("/org/codes");
-  return { message: `「${before.name}」のコードを保存しました。` };
+  return {
+    message:
+      before.name === name
+        ? `「${name}」のコードを保存しました。`
+        : `「${before.name}」を「${name}」に変更しました。`,
+  };
 }
