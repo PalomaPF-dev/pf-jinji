@@ -15,7 +15,7 @@
 export interface JinjiAdmin {
   loginId: string;
   name: string;
-  /** 責任者。ポータルの権限に関わらず入室でき、全機能（給与・考課・設定）を扱える */
+  /** 責任者。ポータルの権限に関わらず入室できる（考課・給与・設定は開けない） */
   isOwner: boolean;
   /** 廃止（ポータル管理者に統合）。列は残っているが判定には使わない */
   canPayroll: boolean;
