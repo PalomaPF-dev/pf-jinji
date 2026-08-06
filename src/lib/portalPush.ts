@@ -244,10 +244,18 @@ export async function buildPortalSync(): Promise<{
     ORDER BY employee_no ASC`;
 
   // ===== 職場の長（承認者）を決める =====
-  // その職場の在籍者が**最も多く指している管理者**を、その職場の長とする。
-  // 1つの職場に複数の管理者が出るのは、職場の長（本人の管理者は工場長）と
-  // 一般（管理者は職場の長）が混ざるため。数の多いほうが職場の長になる。
-  // 管理者が別の職場に所属していても（兼任）そのまま採る。
+  // その職場の在籍者が指している管理者から1人選ぶ。
+  //
+  // 1つの職場に管理者が2人出るのは、職場の長（本人の管理者は工場長）と
+  // 一般（管理者は職場の長）が混ざるため。**その職場に所属している管理者を優先**する。
+  // 数だけで決めると、2人しか居ない職場（グループ長＋1名）で 1対1 になり、
+  // 職場の外に居る工場長が職場の長になってしまう。
+  // 職場の中に管理者が居ないとき（笹野配送ｾﾝﾀｰ など）だけ、外の管理者＝兼任を採る。
+  const orgOfEmployee = new Map<string, string>();
+  for (const r of rows) {
+    const orgId = (r.org_unit_id as string | null) ?? null;
+    if (orgId) orgOfEmployee.set(r.employee_no as string, orgId);
+  }
   const adminCount = new Map<string, Map<string, number>>();
   for (const r of rows) {
     const orgId = (r.org_unit_id as string | null) ?? null;
@@ -260,8 +268,12 @@ export async function buildPortalSync(): Promise<{
   }
   const adminOfOrg = new Map<string, string>();
   for (const [orgId, m] of adminCount) {
-    // 同数のときは社員番号の小さいほう（＝毎回同じ結果になるように）
-    const best = [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    const best = [...m.entries()].sort((a, b) => {
+      // ①その職場に所属している管理者 ②指している人数 ③社員番号（毎回同じ結果になるように）
+      const inA = orgOfEmployee.get(a[0]) === orgId ? 1 : 0;
+      const inB = orgOfEmployee.get(b[0]) === orgId ? 1 : 0;
+      return inB - inA || b[1] - a[1] || a[0].localeCompare(b[0]);
+    })[0];
     if (best) adminOfOrg.set(orgId, best[0]);
   }
   for (const o of orgs) {

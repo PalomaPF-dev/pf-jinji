@@ -1,6 +1,7 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
 import { restructureOrgByName } from "./orgRestructure";
+import { applyLeaveByOrgName } from "./leaveOrg";
 import { excelDateToIso } from "./xlsx";
 import type { Gender } from "./types";
 
@@ -309,6 +310,12 @@ export async function importRoster(
     await restructureOrgByName();
   } catch (e) {
     result.errors.push({ row: 0, employeeNo: "-", message: `階層の自動整理に失敗: ${(e as Error).message}` });
+  }
+  // 「◯◯工場 長欠」の職場に居る人は休職として数える（名簿に在籍区分の欄が無いため）
+  try {
+    await applyLeaveByOrgName(getSql());
+  } catch (e) {
+    result.errors.push({ row: 0, employeeNo: "-", message: `長欠の反映に失敗: ${(e as Error).message}` });
   }
 
   return result;

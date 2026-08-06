@@ -1,5 +1,6 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
+import { applyLeaveByOrgName } from "./leaveOrg";
 import type { XlsxSheet } from "./xlsx";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -418,5 +419,11 @@ export async function importHrMaster(sheets: XlsxSheet[]): Promise<HrMasterResul
 
   const org = await importOrgHierarchy(hier);
   const employees = await importApprovers(appr);
+  // 「◯◯工場 長欠」の職場に居る人は休職として数える（名簿に在籍区分の欄が無いため）
+  try {
+    await applyLeaveByOrgName(getSql());
+  } catch (e) {
+    errors.push({ sheet: "-", row: 0, message: `長欠の反映に失敗: ${(e as Error).message}` });
+  }
   return { org, employees, errors };
 }
