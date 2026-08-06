@@ -1,6 +1,7 @@
 import { getSql } from "./neon";
 import { ensureAuthSchema } from "./authDb";
 import { ensurePasswordResetSchema } from "./passwordReset";
+import { applyLeaveByOrgName } from "./leaveOrg";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -29,7 +30,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -515,6 +516,9 @@ async function buildSchema(): Promise<void> {
 
   await seedEvaluationItems(sql);
   await bootstrapAdmins(sql);
+  // 既に取り込み済みのデータにも「長欠の職場＝休職」を効かせる（版が上がった1回だけ）。
+  // 以後は取込のたびに importRoster / importHrMaster が掛け直す。
+  await applyLeaveByOrgName(sql);
 
   // ここまで通ったら版を記録する。以後のコールドスタートは1往復で済む。
   // 途中で失敗した場合は記録されないので、次回また最初から流れる。

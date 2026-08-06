@@ -6,11 +6,14 @@ import { countByStatus } from "@/lib/employees";
 import { countOpenTransfers, listDueTransfers } from "@/lib/transfers";
 import { countExpiring, listQualifications } from "@/lib/qualifications";
 import { listOrgUnits } from "@/lib/org";
+import { headcountTrend } from "@/lib/headcount";
+import { getScope } from "@/lib/scope";
 import { daysUntil, todayJST } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import { ExpiryBadge } from "@/components/Badges";
 import DbErrorState from "@/components/DbErrorState";
 import PageHeader from "@/components/PageHeader";
+import HeadcountTrendTable from "@/components/HeadcountTrend";
 import { EMPLOYMENT_STATUS_LABEL, TRANSFER_KIND_LABEL } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -61,15 +64,18 @@ export default async function HomePage() {
 
   const s = await requireJinjiSession();
   const today = todayJST();
+  const scope = await getScope(s.grant);
 
-  const [statusCounts, openTransfers, dueTransfers, orgUnits, expiring, expiringList] = await Promise.all([
-    countByStatus(),
-    countOpenTransfers(),
-    listDueTransfers(today),
-    listOrgUnits(),
-    countExpiring(today),
-    listQualifications({ expiringOnly: true, today, withinDays: 90 }),
-  ]);
+  const [statusCounts, openTransfers, dueTransfers, orgUnits, expiring, expiringList, trend] =
+    await Promise.all([
+      countByStatus(),
+      countOpenTransfers(),
+      listDueTransfers(today),
+      listOrgUnits(),
+      countExpiring(today),
+      listQualifications({ expiringOnly: true, today, withinDays: 90 }),
+      headcountTrend({ today, months: 12, scopeOrgIds: scope.orgUnitIds }),
+    ]);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -99,6 +105,20 @@ export default async function HomePage() {
           sub={`期限切れ ${expiring.expired} / 90日以内 ${expiring.soon}`}
         />
       </div>
+
+      {/* 部署ごとの人員推移 */}
+      <section className="mb-6 rounded-xl border border-[#e5e5e5] bg-white p-5">
+        <h2 className="mb-1 text-sm font-bold text-[#333333]">
+          部署ごとの人員推移{scope.scopeName ? `（${scope.scopeName}）` : ""}
+        </h2>
+        <p className="mb-3 text-xs text-[#707070]">
+          各月末（今月は本日）時点で籍のある人数です。休職・出向も人員として数えています。
+          <br />
+          所属は<strong>現在の所属</strong>で遡って数えているため、異動した人は過去の月も異動後の部署に乗ります。
+          退職者を取り込むまでは減少が出ません。
+        </p>
+        <HeadcountTrendTable trend={trend} />
+      </section>
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* 発令日が来ているのに未反映のもの */}
