@@ -9,6 +9,15 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  experimental: {
+    serverActions: {
+      // 取込は Server Action にファイルを渡す。既定の上限は 1MB で、
+      // 名簿・賞与マスタ（1,700名で 1.1MB）が入らず
+      // 「An unexpected response was received from the server.」になる。
+      // Vercel のリクエスト本文の上限が 4.5MB なので、その手前まで上げる。
+      bodySizeLimit: "4mb",
+    },
+  },
 };
 
 export default nextConfig;

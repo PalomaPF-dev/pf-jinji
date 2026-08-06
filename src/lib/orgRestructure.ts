@@ -20,6 +20,20 @@ import { normalizeOrgName } from "./hrMasterImport";
  * 人が組織図で動かした組織は、この規則に一致しない限り触らない。
  */
 
+/**
+ * 先頭の語が部署の略称になっている組織の受け皿。
+ *
+ * 名簿は「調達 専門部品グループ」のように**部署名を略して**先頭に付けることがある。
+ * 「〜部」「〜工場」で終わらないため上の規則から外れ、本部の直下に平らに並んでしまう。
+ * そこで略称ごとに「どの部署の、どの室の下に置くか」を決めておく。
+ *
+ * 先頭の略称は名前から落とす（「調達 専門部品グループ」→「専門部品グループ」）。
+ * 部署の下に室が並ぶ形になるので、接頭辞は重複でしかないため。
+ */
+const PREFIX_RULES: { prefix: string; dept: string; middle: string }[] = [
+  { prefix: "調達", dept: "調達部", middle: "調達室" },
+];
+
 /** 名称から中間層の名前を求める。中間層を作らない名称は null。 */
 export function groupKeyOf(name: string): string | null {
   const tokens = name.split(/[\s　]+/).filter(Boolean);
@@ -38,6 +52,8 @@ export interface RestructureResult {
   middlesCreated: number;
   /** 親を付け替えた組織の数 */
   moved: number;
+  /** 接頭辞を落として改称した組織の数 */
+  renamed: number;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -49,7 +65,7 @@ export interface RestructureResult {
 export async function restructureOrgByName(): Promise<RestructureResult> {
   await ensureSchema();
   const sql = getSql();
-  const result: RestructureResult = { middlesCreated: 0, moved: 0 };
+  const result: RestructureResult = { middlesCreated: 0, moved: 0, renamed: 0 };
 
   const units = await sql`SELECT id, code, name, parent_id FROM jinji_org_units`;
   const byId = new Map(units.map((u: any) => [u.id as string, u]));
@@ -94,7 +110,10 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
     g.leaf.push(leaf);
     needed.set(key, g);
   }
-  if (needed.size === 0) return result;
+  if (needed.size === 0) {
+    await applyPrefixRules(sql, result);
+    return result;
+  }
 
   // 中間層を用意する。同名の組織が既にあればそれを使い、無ければ作る。
   // 自前で作るものには衝突しない合成コード（AUTO-名称）を振る。
@@ -162,5 +181,70 @@ export async function restructureOrgByName(): Promise<RestructureResult> {
       WHERE o.id = v.id`;
     result.moved = moveIds.length;
   }
+
+  await applyPrefixRules(sql, result);
   return result;
+}
+
+/**
+ * 略称が先頭に付いた組織を、部署 → 室 の下へ入れて接頭辞を落とす。
+ * 取込のたびに呼ばれる（名簿は毎回もとの長い名前で入ってくるため）。
+ */
+async function applyPrefixRules(sql: any, result: RestructureResult): Promise<void> {
+  for (const rule of PREFIX_RULES) {
+    // 「調達 ◯◯」だけを拾う。「調達部」そのもの・「調達室」は対象外
+    const head = new RegExp(`^${rule.prefix}[\\s　]+`);
+    const units: any[] = await sql`SELECT id, parent_id, code, name FROM jinji_org_units`;
+    const targets = units.filter((u) => head.test(u.name as string));
+    if (targets.length === 0) continue;
+
+    // 受け皿の部署。同名があればそれを使い、無ければ作る
+    const norm = (v: string) => normalizeOrgName(v);
+    const dept =
+      units.find((u) => norm(u.name as string) === norm(rule.dept)) ??
+      (
+        await sql`
+          INSERT INTO jinji_org_units (code, name, kind, parent_id)
+          VALUES (${`AUTO-${rule.dept}`}, ${rule.dept}, ${"bu"},
+                  ${(targets[0].parent_id as string | null) ?? null})
+          ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+          RETURNING id, parent_id, code, name`
+      )[0];
+    if (!dept) continue;
+
+    // 部署と室のあいだの室。無ければ作る
+    const middle =
+      units.find((u) => norm(u.name as string) === norm(rule.middle)) ??
+      (
+        await sql`
+          INSERT INTO jinji_org_units (code, name, kind, parent_id)
+          VALUES (${`AUTO-${rule.middle}`}, ${rule.middle}, ${"ka"}, ${dept.id})
+          ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+          RETURNING id, parent_id, code, name`
+      )[0];
+    if (!middle) continue;
+    if (middle.parent_id !== dept.id) {
+      await sql`UPDATE jinji_org_units SET parent_id = ${dept.id} WHERE id = ${middle.id}`;
+    }
+
+    // 接頭辞を落として室の下へ
+    const ids: string[] = [];
+    const names: string[] = [];
+    for (const t of targets) {
+      const short = (t.name as string).replace(head, "").trim();
+      if (!short) continue;
+      if (t.name === short && t.parent_id === middle.id) continue;
+      ids.push(t.id as string);
+      names.push(short);
+    }
+    if (ids.length > 0) {
+      await sql`
+        UPDATE jinji_org_units o
+        SET name = v.name, parent_id = ${middle.id}, updated_at = NOW()
+        FROM unnest(${ids}::uuid[], ${names}::text[]) AS v(id, name)
+        WHERE o.id = v.id`;
+      result.renamed += ids.length;
+      result.moved += ids.length;
+    }
+  }
 }
