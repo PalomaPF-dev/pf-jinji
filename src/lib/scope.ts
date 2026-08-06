@@ -5,10 +5,10 @@ import type { JinjiGrant } from "./types";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * 管理者（can_manage）の**表示範囲**。
+ * ポータル上の管理者（role='admin'）の**表示範囲**。
  *
- * ポータル管理者は本部全体を見られるが、各工場の管理者には
- * **ログインした本人が所属する工場（部）だけ**を見せる。
+ * ポータル管理者（ポータル管理権限）は本部全体を見られるが、
+ * 各工場の管理者には**ログインした本人が所属する工場（部）だけ**を見せる。
  *
  * 「自分の工場」は本人の社員記録から求める。ログインの社員番号は
  * 社員台帳の社員番号と同じ値（ポータルの login_id）なので、
@@ -45,8 +45,8 @@ function loginIdCandidates(loginId: string): string[] {
 }
 
 /**
- * 表示範囲を求める。ポータル管理者（と名簿の責任者）は常に全体。
- * 管理者は自分の工場（本部直下の組織）配下だけ。
+ * 表示範囲を求める。ポータル管理者（ポータル管理権限）は常に全体。
+ * ポータル上の管理者は自分の工場（本部直下の組織）配下だけ。
  */
 export async function getScope(grant: JinjiGrant): Promise<JinjiScope> {
   if (grant.isPortalAdmin || grant.isOwner) return FULL_SCOPE;
