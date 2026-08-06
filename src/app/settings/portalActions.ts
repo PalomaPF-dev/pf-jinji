@@ -30,12 +30,14 @@ export async function previewPortalPushAction(): Promise<PortalPushState> {
   try {
     const { orgs, employees } = await buildPortalSync();
     const withManager = employees.filter((e) => e.managerLoginId).length;
+    const workplaces = orgs.filter((o) => o.kind === "workplace");
+    const withAdmin = workplaces.filter((o) => o.adminLoginId).length;
     return {
       preview: employees,
       previewOrgs: orgs,
       message:
         `組織 ${orgs.length} 件（部署 ${orgs.filter((o) => o.kind === "dept").length} / ` +
-        `職場 ${orgs.filter((o) => o.kind === "workplace").length}）、` +
+        `職場 ${workplaces.length}、うち職場の長を決められる ${withAdmin}）、` +
         `社員 ${employees.length} 名（うち管理者(承認者)あり ${withManager} 名）が連携対象です。` +
         `内容を確認してから「ポータルへ連携」を実行してください。`,
     };

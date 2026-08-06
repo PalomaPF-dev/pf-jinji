@@ -64,6 +64,12 @@ export interface PortalOrgPayload {
   /** 工場か（ポータルの kind='factory' に対応。部署のみ） */
   isFactory: boolean;
   sort: number;
+  /**
+   * この職場の長（承認者）の社員番号。職場のみ。
+   * 人事マスタで**その職場の人が最も多く指している管理者**を採る。
+   * 兼任（別の職場に所属している管理者）もそのまま送る。
+   */
+  adminLoginId?: string | null;
 }
 
 export interface PortalPushResult {
@@ -76,8 +82,8 @@ export interface PortalPushResult {
   reprovisioned: number;
   /** 承認者を設定した件数 */
   approverSet: number;
-  /** 組織の連携結果 */
-  orgs: { sent: number; created: number; linked: number; updated: number };
+  /** 組織の連携結果。adminSet は職場の長（承認者となる管理者）を設定した職場の数 */
+  orgs: { sent: number; created: number; linked: number; updated: number; adminSet: number };
   errors: { loginId: string; message: string }[];
 }
 
@@ -151,6 +157,7 @@ export async function buildPortalSync(): Promise<{
   const rootIds = new Set(roots.map((r: any) => r.id as string));
   const deptCodeOfOrg = new Map<string, string>(); // 組織id → 属する部署のコード
   const deptIdSet = new Set<string>(); // 部署そのものの組織id
+  const orgIdByPayloadCode = new Map<string, string>(); // 送るコード → 組織id
   const orgs: PortalOrgPayload[] = [];
   let sortSeq = 0;
 
@@ -198,6 +205,7 @@ export async function buildPortalSync(): Promise<{
         if (wpCode === deptCode) {
           deptIdSet.add(id);
         } else {
+          orgIdByPayloadCode.set(wpCode, id);
           orgs.push({
             kind: "workplace",
             code: wpCode,
@@ -234,6 +242,33 @@ export async function buildPortalSync(): Promise<{
            manager_employee_no
     FROM jinji_employees
     ORDER BY employee_no ASC`;
+
+  // ===== 職場の長（承認者）を決める =====
+  // その職場の在籍者が**最も多く指している管理者**を、その職場の長とする。
+  // 1つの職場に複数の管理者が出るのは、職場の長（本人の管理者は工場長）と
+  // 一般（管理者は職場の長）が混ざるため。数の多いほうが職場の長になる。
+  // 管理者が別の職場に所属していても（兼任）そのまま採る。
+  const adminCount = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const orgId = (r.org_unit_id as string | null) ?? null;
+    const mgr = (r.manager_employee_no as string | null) ?? null;
+    if (!orgId || !mgr || mgr === (r.employee_no as string)) continue;
+    if (normalizeEmploymentStatus(r.status) === "retired") continue;
+    const m = adminCount.get(orgId) ?? new Map<string, number>();
+    m.set(mgr, (m.get(mgr) ?? 0) + 1);
+    adminCount.set(orgId, m);
+  }
+  const adminOfOrg = new Map<string, string>();
+  for (const [orgId, m] of adminCount) {
+    // 同数のときは社員番号の小さいほう（＝毎回同じ結果になるように）
+    const best = [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    if (best) adminOfOrg.set(orgId, best[0]);
+  }
+  for (const o of orgs) {
+    if (o.kind !== "workplace") continue;
+    const orgId = orgIdByPayloadCode.get(o.code);
+    o.adminLoginId = orgId ? (adminOfOrg.get(orgId) ?? null) : null;
+  }
 
   const employees = rows.map((r) => {
     const { departmentCode, workplaceCode } = resolveCodes((r.org_unit_id as string | null) ?? null);
@@ -306,8 +341,12 @@ export async function pushToPortal(
 
   let total: PortalPushResult | null = null;
   for (let i = 0; i < chunks.length; i++) {
-    // 組織は先頭の1回だけ。2回目以降に送っても結果は同じだが、無駄な往復になる
-    const r = await pushOnce(chunks[i], i === 0 ? options : { ...options, orgs: [] });
+    // 組織は先頭で送る（部署・職場が無いと社員の所属を解決できないため）。
+    // 複数回に分かれるときは最後にもう一度送る。職場の長は後半の回で作られる
+    // ことがあり、その回まで待たないとポータル側でIDを引けないため。
+    // 2回目は差分が無いので数往復で終わる。
+    const withOrgs = i === 0 || i === chunks.length - 1;
+    const r = await pushOnce(chunks[i], withOrgs ? options : { ...options, orgs: [] });
     if (!total) {
       total = r;
     } else {
@@ -318,7 +357,13 @@ export async function pushToPortal(
         skipped: total.skipped + r.skipped,
         reprovisioned: total.reprovisioned + r.reprovisioned,
         approverSet: total.approverSet + r.approverSet,
-        orgs: total.orgs,
+        orgs: {
+          sent: total.orgs.sent || r.orgs.sent,
+          created: total.orgs.created + r.orgs.created,
+          linked: total.orgs.linked + r.orgs.linked,
+          updated: total.orgs.updated + r.orgs.updated,
+          adminSet: total.orgs.adminSet + r.orgs.adminSet,
+        },
         errors: [...total.errors, ...r.errors],
       };
     }
@@ -339,7 +384,7 @@ async function pushOnce(
     skipped: 0,
     reprovisioned: 0,
     approverSet: 0,
-    orgs: { sent: 0, created: 0, linked: 0, updated: 0 },
+    orgs: { sent: 0, created: 0, linked: 0, updated: 0, adminSet: 0 },
     errors: [],
   };
   const orgs = options.orgs ?? [];
@@ -389,7 +434,13 @@ async function pushOnce(
         reprovisioned?: boolean;
         approverSet?: boolean;
       }[];
-      organizations?: { created?: number; linked?: number; updated?: number; errors?: string[] };
+      organizations?: {
+        created?: number;
+        linked?: number;
+        updated?: number;
+        adminSet?: number;
+        errors?: string[];
+      };
     } | null;
     const results = data?.results ?? [];
 
@@ -405,6 +456,7 @@ async function pushOnce(
         created: data?.organizations?.created ?? 0,
         linked: data?.organizations?.linked ?? 0,
         updated: data?.organizations?.updated ?? 0,
+        adminSet: data?.organizations?.adminSet ?? 0,
       },
       errors: (data?.organizations?.errors ?? []).map((m) => ({ loginId: "組織", message: m })),
     };
@@ -434,6 +486,7 @@ export function describePushResult(r: PortalPushResult): string {
     if (r.orgs.created) o.push(`新規 ${r.orgs.created}`);
     if (r.orgs.linked) o.push(`既存へ紐づけ ${r.orgs.linked}`);
     if (r.orgs.updated) o.push(`更新 ${r.orgs.updated}`);
+    if (r.orgs.adminSet) o.push(`職場の長 ${r.orgs.adminSet}`);
     parts.push(o.join(" "));
   }
   if (r.sent) parts.push(`社員 ${r.sent} 件`);

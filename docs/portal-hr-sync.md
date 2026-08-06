@@ -26,6 +26,7 @@ PF人事管理（`pf-jinji`）を**人のマスター**とし、ポータル（`
 | 氏名・所属・役職・職務・生年月日・入社日・雇用体系・在籍状態 | **人事管理** | 人事管理 → ポータル |
 | 部署・職場そのものの存在（コード・名称・親子） | **人事管理** | 人事管理 → ポータル（`organizations`） |
 | 管理者（承認者） | **人事管理** | 人事管理 → ポータル（`managerLoginId` → `approver_user_id`） |
+| 職場の長 | **人事管理** | 人事管理 → ポータル（職場の `adminLoginId` → `admin_user_id`） |
 | アカウントの存在（社員番号） | **人事管理** | 人事管理 → ポータル（`createMissing`。パスワード未設定で発行） |
 | パスワード・アプリ権限（role / can_manage / 部署の apps 割当） | **ポータル** | 連携しない（ポータルが保持） |
 | 組織の階層（本部→工場/部→職場）・組織の長 | **人事管理** | 人事管理が保持（ポータルは部署→職場の2階層に潰して受ける） |
@@ -56,7 +57,8 @@ Content-Type: application/json
     { "kind": "dept", "code": "12121102", "name": "大口工場",
       "departmentCode": null, "isFactory": true, "sort": 1 },
     { "kind": "workplace", "code": "12124001", "name": "大口工場 ﾌﾟﾚｽ1",
-      "departmentCode": "12121102", "isFactory": false, "sort": 2 }
+      "departmentCode": "12121102", "isFactory": false, "sort": 2,
+      "adminLoginId": "E100" }
   ],
   "employees": [
     {
@@ -89,7 +91,7 @@ Content-Type: application/json
     { "loginId": "E201", "status": "created", "reprovisioned": true },
     { "loginId": "E999", "status": "error", "message": "部署コード D999 が見つかりません" }
   ],
-  "organizations": { "created": 206, "linked": 3, "updated": 0, "errors": [] }
+  "organizations": { "created": 206, "linked": 3, "updated": 0, "adminSet": 141, "errors": [] }
 }
 ```
 
@@ -101,7 +103,7 @@ Content-Type: application/json
 | `error` | 部署コード不一致など、その社員だけ失敗 |
 
 `organizations` は組織の連携結果。`created`＝新規作成、`linked`＝同名の既存へ紐づけ、
-`updated`＝名称・所属部署の更新。
+`updated`＝名称・所属部署の更新、`adminSet`＝職場の長を設定した職場の数。
 
 `reprovisioned` は「所属が変わったので各アプリへ再連携した」ことを示す。
 **所属が変わっていなくても役職や人事項目は更新される**ので、`updated` と
@@ -138,13 +140,20 @@ Content-Type: application/json
 1. `organizations` を部署 → 職場の順に突合（`hr_code` → 名称 → 新規作成）
 2. 社員を1人ずつ処理。未登録は `createMissing` のときだけ発行、既存は人事項目と所属を更新
 3. 全員ぶんの行が揃ってから `managerLoginId` を `approver_user_id` へ解決
-4. 所属が変わった在籍者だけ `provisionUsers()` で各アプリへ再連携
+4. 同じく、職場の `adminLoginId` を `admin_user_id` へ解決（兼任＝別の職場に
+   所属している管理者もそのまま設定する。`role` は変えない）
+5. 所属が変わった在籍者だけ `provisionUsers()` で各アプリへ再連携
+
+人数が多く送信が複数回に分かれるときは、人事管理側が `organizations` を
+**先頭と末尾の2回**送る。先頭は部署・職場を作るため、末尾は後半の回で作られた
+管理者を職場の長として解決するため。2回目は差分が無いので数往復で終わる。
 
 ## 検証
 
 `pf-jinji` の実データ（209組織・1,685名）を実DBへ流し、次を確認している。
 
 - 組織: 新規206件・既存へ紐づけ3件・エラー0。既存部署（D001 等）の `code` と `apps` は不変
-- 社員: 1,685名を発行・承認者1,098名を設定・エラー0（約3.4秒）
+- 社員: 1,685名を発行・承認者1,098名を設定・エラー0（約2秒）
+- 職場の長: 141職場に設定（うち44職場は別の職場に所属する管理者＝兼任）。`role` は不変
 - 2回目は新規0件で人数据え置き（冪等）
 - ポータルの `role` / `can_manage` は連携で変わらない
