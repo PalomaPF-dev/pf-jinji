@@ -267,7 +267,12 @@ export async function buildPortalPayloadFor(employeeNos: string[]): Promise<Port
   return all.filter((p) => want.has(p.loginId));
 }
 
-const FETCH_TIMEOUT_MS = 20000;
+/**
+ * 1回の送信の上限。ポータル側は一括SQLで処理するが、リクエストが大きすぎると
+ * サーバーレスの実行時間・本文サイズの上限に当たるため分けて送る。
+ */
+const EMPLOYEE_CHUNK = 400;
+const FETCH_TIMEOUT_MS = 60000;
 
 /**
  * ポータルへ送る。
@@ -283,7 +288,47 @@ export interface PortalPushOptions {
   createMissing?: boolean;
 }
 
+/**
+ * ポータルへ送る。人数が多いときは分けて送り、結果を足し合わせる。
+ *
+ * 1回で全員を送ると、ポータル側の実行時間・本文サイズの上限に当たる。
+ * 組織は最初の1回だけ一緒に送る（部署・職場が無いと社員の所属を解決できないため）。
+ */
 export async function pushToPortal(
+  payload: PortalEmployeePayload[],
+  options: PortalPushOptions = {},
+): Promise<PortalPushResult> {
+  const chunks: PortalEmployeePayload[][] = [];
+  for (let i = 0; i < payload.length; i += EMPLOYEE_CHUNK) {
+    chunks.push(payload.slice(i, i + EMPLOYEE_CHUNK));
+  }
+  if (chunks.length === 0) chunks.push([]);
+
+  let total: PortalPushResult | null = null;
+  for (let i = 0; i < chunks.length; i++) {
+    // 組織は先頭の1回だけ。2回目以降に送っても結果は同じだが、無駄な往復になる
+    const r = await pushOnce(chunks[i], i === 0 ? options : { ...options, orgs: [] });
+    if (!total) {
+      total = r;
+    } else {
+      total = {
+        sent: total.sent + r.sent,
+        updated: total.updated + r.updated,
+        created: total.created + r.created,
+        skipped: total.skipped + r.skipped,
+        reprovisioned: total.reprovisioned + r.reprovisioned,
+        approverSet: total.approverSet + r.approverSet,
+        orgs: total.orgs,
+        errors: [...total.errors, ...r.errors],
+      };
+    }
+    // 接続断・鍵の未設定など、続けても同じ結果になる失敗は打ち切る
+    if (r.sent === 0 && r.errors.length > 0 && r.created + r.updated === 0) break;
+  }
+  return total!;
+}
+
+async function pushOnce(
   payload: PortalEmployeePayload[],
   options: PortalPushOptions = {},
 ): Promise<PortalPushResult> {
