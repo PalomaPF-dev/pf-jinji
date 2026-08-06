@@ -7,7 +7,12 @@ import { listEvaluationItems } from "@/lib/evaluations";
 import { listAuditLogs } from "@/lib/audit";
 import { formatDateTime } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
-import AdminUpsertForm, { IssueLinkForm, RemoveAdminForm } from "@/components/AdminForms";
+import PortalSyncForm, { RestructureForm } from "@/components/PortalSyncForm";
+import AdminUpsertForm, {
+  ClearAuditLogsForm,
+  IssueLinkForm,
+  RemoveAdminForm,
+} from "@/components/AdminForms";
 import QualificationMasterForm, {
   DeleteQualificationMasterForm,
 } from "@/components/QualificationMasterForms";
@@ -167,9 +172,19 @@ export default async function SettingsPage({
           </p>
         </section>
 
+        {/* ===== 組織の取込・整理 ===== */}
+        <section className="space-y-5">
+          <h2 className="text-base font-bold text-[#333333]">組織の取込・整理</h2>
+          <PortalSyncForm />
+          <RestructureForm />
+        </section>
+
         {/* ===== 監査ログ ===== */}
         <section>
-          <h2 className="mb-3 text-base font-bold text-[#333333]">監査ログ（直近100件）</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold text-[#333333]">監査ログ（直近100件）</h2>
+            <ClearAuditLogsForm count={logs.length} />
+          </div>
           <div className="overflow-x-auto rounded-xl border border-[#e5e5e5] bg-white">
             <table className="w-full min-w-[720px] text-sm">
               <thead>

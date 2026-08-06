@@ -11,6 +11,7 @@ import {
   updateOrgUnit,
   type OrgUnitInput,
 } from "@/lib/org";
+import { randomUUID } from "crypto";
 import { normalizeOrgKind } from "@/lib/types";
 import { formValues, type FormValues } from "@/lib/formState";
 
@@ -77,6 +78,14 @@ function validate(input: OrgUnitInput): string | null {
 export async function createOrgUnitAction(_prev: OrgActionState, form: FormData): Promise<OrgActionState> {
   const s = await assertJinjiSession();
   const input = readOrgInput(form);
+  // 組織コードはアプリ内の識別子でしかない。配置表から作るときに番号を考えさせたくないので、
+  // 空なら 職場コード → 部署コード → 自動採番 の順で埋める。
+  if (!input.code) {
+    input.code =
+      input.workplaceCode ||
+      input.deptCode ||
+      `ORG-${randomUUID().slice(0, 8).toUpperCase()}`;
+  }
   const problem = validate(input);
   if (problem) return { error: problem, values: formValues(form) };
 
@@ -99,8 +108,6 @@ export async function createOrgUnitAction(_prev: OrgActionState, form: FormData)
   }
 
   revalidatePath("/org");
-  revalidatePath("/org/edit");
-  revalidatePath("/org/codes");
   return { message: `「${input.name}」を追加しました。` };
 }
 
@@ -135,7 +142,6 @@ export async function updateOrgUnitAction(_prev: OrgActionState, form: FormData)
     detail: { parentBefore: before.parentId, parentAfter: input.parentId },
   });
   revalidatePath("/org");
-  revalidatePath("/org/edit");
   return { message: `「${input.name}」を更新しました。` };
 }
 
@@ -166,8 +172,6 @@ export async function deleteOrgUnitAction(_prev: OrgActionState, form: FormData)
     detail: { event: "delete", movedChildren: moveChildren },
   });
   revalidatePath("/org");
-  revalidatePath("/org/edit");
-  revalidatePath("/org/codes");
   return { message: `「${target.name}」を削除しました。` };
 }
 
@@ -193,7 +197,6 @@ export async function restructureOrgAction(_prev: OrgActionState): Promise<OrgAc
       detail: { ...r },
     });
     revalidatePath("/org");
-    revalidatePath("/org/edit");
     return {
       message: `整理しました（中間層を ${r.middlesCreated} 件作成 / ${r.moved} 件を配下へ移動）`,
     };
@@ -215,7 +218,6 @@ export async function syncPortalAction(_prev: OrgActionState): Promise<OrgAction
       detail: { ...result },
     });
     revalidatePath("/org");
-    revalidatePath("/org/edit");
     const orphanNote = result.orphans.length
       ? `／ポータル側で見つからない組織 ${result.orphans.length} 件（${result.orphans.join("、")}）`
       : "";
@@ -247,14 +249,18 @@ export async function updateOrgCodesAction(
   if (!name) return { error: "組織名は必須です。", values: formValues(form) };
   // 上位組織は送られてきたときだけ変える（コードの設定画面は階層を触らない）
   const parentId = form.has("parentId") ? nullable(form, "parentId") : before.parentId;
+  const kind = form.has("kind") ? normalizeOrgKind(str(form, "kind")) : before.kind;
+  const headEmployeeId = form.has("headEmployeeId")
+    ? nullable(form, "headEmployeeId")
+    : before.headEmployeeId;
 
   const input: OrgUnitInput = {
     code: before.code,
     name,
-    kind: before.kind,
+    kind,
     parentId,
     sort: before.sort,
-    headEmployeeId: before.headEmployeeId,
+    headEmployeeId,
     description: before.description,
     validFrom: before.validFrom,
     validTo: before.validTo,
@@ -290,8 +296,6 @@ export async function updateOrgCodesAction(
     },
   });
   revalidatePath("/org");
-  revalidatePath("/org/edit");
-  revalidatePath("/org/codes");
   const moved = parentId !== before.parentId;
   return {
     message: moved

@@ -2,7 +2,7 @@ import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
 import { activeOn, buildOrgTree, listOrgUnits } from "./org";
 import { normalizeOrgName } from "./hrMasterImport";
-import type { OrgNode } from "./types";
+import type { OrgKind, OrgNode } from "./types";
 import type { OrgPlanMove } from "./orgPlans";
 
 /**
@@ -53,6 +53,10 @@ export interface ChartNode {
   workplaceCode: string | null;
   /** 上位組織。組織図から階層を直すときの現在値 */
   parentId: string | null;
+  /** 区分（部・課・工場…）。組織図から直せるように */
+  kind: OrgKind;
+  /** 組織の長（jinji_employees.id） */
+  headEmployeeId: string | null;
   /** 階層の絞り込みで畳んだ配下（この枠より深い組織数・人数の合計） */
   hidden?: { units: number; people: number };
 }
@@ -141,6 +145,8 @@ export async function buildOrgChart(
       deptCode: n.deptCode ?? null,
       workplaceCode: n.workplaceCode ?? null,
       parentId: n.parentId ?? null,
+      kind: n.kind,
+      headEmployeeId: n.headEmployeeId ?? null,
     };
     hostByUnitId.set(n.id, node);
     node.children = n.children.map(toChart);

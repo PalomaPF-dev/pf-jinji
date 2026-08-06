@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { assertOwnerSession } from "@/lib/session";
-import { recordAudit } from "@/lib/audit";
+import { clearAuditLogs, recordAudit } from "@/lib/audit";
 import { formValues, type FormValues } from "@/lib/formState";
 import {
   assertNotLastOwner,
@@ -129,4 +129,31 @@ export async function issueLinkAction(
     detail: { event: "issue_password_link" },
   });
   return { message: `${name} さんの設定リンクを発行しました（有効期限7日）。`, inviteUrl: url };
+}
+
+
+/**
+ * 監査ログを全件削除する。
+ *
+ * 取込を回すと1回で数百件の記録が積み上がり、直近の操作が埋もれてしまうため、
+ * 棚卸しできるようにしてある。**消した事実だけは1件残す**（誰がいつ全消ししたかが
+ * 分からなくなると、記録として意味を持たなくなるため）。
+ */
+export async function clearAuditLogsAction(): Promise<SettingsActionState> {
+  const s = await assertOwnerSession();
+  try {
+    const removed = await clearAuditLogs();
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "update_admin",
+      targetType: "audit",
+      targetLabel: "監査ログを全件削除",
+      detail: { removed },
+    });
+    revalidatePath("/settings");
+    return { message: `監査ログ ${removed} 件を削除しました。` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Hash, LayoutGrid, Pencil, Settings2 } from "lucide-react";
+import { LayoutGrid, Pencil } from "lucide-react";
 import { requireJinjiSession } from "@/lib/session";
 import { getScope } from "@/lib/scope";
 import { activeOn, buildOrgTree, flattenTree, listOrgUnits, loadOrgChart } from "@/lib/org";
@@ -97,13 +97,6 @@ export default async function OrgPage({
                   <LayoutGrid className="h-4 w-4" />
                   異動案
                 </Link>
-                <Link
-                  href="/org/codes"
-                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-2 text-sm font-medium text-[#555555] hover:bg-[#f7f7f5]"
-                >
-                  <Hash className="h-4 w-4" />
-                  部署・職場の設定
-                </Link>
                 {asBoard && (
                   <Link
                     href={`/org?${new URLSearchParams({
@@ -114,21 +107,14 @@ export default async function OrgPage({
                     })}`}
                     className={`no-print inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${
                       orgEdit
-                        ? "bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
-                        : "border border-[#e5e5e5] bg-white text-[#555555] hover:bg-[#f7f7f5]"
+                        ? "border border-[#e5e5e5] bg-white text-[#555555] hover:bg-[#f7f7f5]"
+                        : "bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
                     }`}
                   >
                     <Pencil className="h-4 w-4" />
-                    {orgEdit ? "編集モードを終える" : "この画面で編集"}
+                    {orgEdit ? "編集モードを終える" : "組織を編集"}
                   </Link>
                 )}
-                <Link
-                  href="/org/edit"
-                  className="no-print inline-flex items-center gap-1.5 rounded-lg bg-[#2563eb] px-3 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
-                >
-                  <Settings2 className="h-4 w-4" />
-                  組織を編集
-                </Link>
               </>
             )}
           </>
@@ -215,23 +201,16 @@ export default async function OrgPage({
       {nodes.length === 0 ? (
         <EmptyState
           title="組織が登録されていません"
-          description="「組織を編集」からポータルの部署マスターを取り込むか、組織を追加してください。"
-          action={
-            <Link
-              href="/org/edit"
-              className="rounded-lg bg-[#2563eb] px-4 py-2 text-sm font-medium text-white hover:bg-[#1d4ed8]"
-            >
-              組織を編集
-            </Link>
-          }
+          description="設定の「組織の取込・整理」からポータルの部署マスターを取り込むか、人事マスタのExcelを取り込んでください。"
         />
       ) : asBoard && board ? (
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-4">
           <>
           {orgEdit && (
             <p className="no-print mb-3 rounded-lg border border-[#c8d8f5] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
-              枠の見出しの「編集」を押すと、その場で<strong>組織名・部署コード・職場コード・上位組織</strong>を直せます。
-              誰がぶら下がっているかを見ながら直せます。上位組織を変えると、配下もそのまま一緒に移ります。
+              枠の見出しの「編集」を押すと、その場で<strong>組織名・部署コード・職場コード・区分・組織の長・上位組織</strong>を
+              直せます。同じところから<strong>配下への追加</strong>と<strong>削除</strong>もできます。
+              上位組織を変えると配下もそのまま一緒に移り、削除するときは配下を1つ上へ引き上げます。
               変更は次の「設定 → ポータルへ連携」でポータルにも反映されます。
             </p>
           )}

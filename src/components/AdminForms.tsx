@@ -1,8 +1,11 @@
 "use client";
 
 import { useActionState } from "react";
+import { Trash2 } from "lucide-react";
+import { useFormStatus } from "react-dom";
 import SubmitButton from "./SubmitButton";
 import {
+  clearAuditLogsAction,
   issueLinkAction,
   removeAdminAction,
   upsertAdminAction,
@@ -137,5 +140,45 @@ export function IssueLinkForm({ loginId, name }: { loginId: string; name: string
       </SubmitButton>
       <Notice state={state} />
     </form>
+  );
+}
+
+/**
+ * 監査ログの全件削除。
+ *
+ * 取込を回すと1回で数百件積み上がるため、棚卸しできるようにしてある。
+ * 押し間違いが痛い操作なので、確認を挟む。
+ */
+export function ClearAuditLogsForm({ count }: { count: number }) {
+  const [state, formAction] = useActionState(clearAuditLogsAction, {} as SettingsActionState);
+  return (
+    <form action={formAction} className="flex flex-wrap items-center gap-2">
+      <ClearButton count={count} />
+      {state.error && <span className="text-xs text-[#b91c1c]">{state.error}</span>}
+      {state.message && <span className="text-xs text-[#1c7a4d]">{state.message}</span>}
+    </form>
+  );
+}
+
+function ClearButton({ count }: { count: number }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending || count === 0}
+      onClick={(e) => {
+        if (
+          !window.confirm(
+            "監査ログをすべて削除します。誰がいつ何をしたかの記録が消え、元に戻せません。よろしいですか？",
+          )
+        ) {
+          e.preventDefault();
+        }
+      }}
+      className="inline-flex items-center gap-1 rounded-lg border border-[#f0d0d0] px-3 py-1.5 text-xs font-medium text-[#b91c1c] hover:bg-[#fdf5f5] disabled:opacity-50"
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      監査ログをすべて削除
+    </button>
   );
 }
