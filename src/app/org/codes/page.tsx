@@ -33,6 +33,11 @@ export default async function OrgCodesPage({
 
   const [units, counts] = await Promise.all([listOrgUnits(), memberCountsByOrg()]);
   const nameById = new Map(units.map((u) => [u.id, u.name]));
+  // 配下の数。削除のときに「上へ移す」かどうかの判断に使う
+  const childCount = new Map<string, number>();
+  for (const u of units) {
+    if (u.parentId) childCount.set(u.parentId, (childCount.get(u.parentId) ?? 0) + 1);
+  }
   const inScope = units.filter((u) => scope.orgUnitIds === null || scope.orgUnitIds.includes(u.id));
 
   // 並びは部署コード → 職場コード（組織図・組織台帳と同じ見え方にする）。
@@ -131,6 +136,7 @@ export default async function OrgCodesPage({
               <th className="px-3 py-2 font-medium">区分</th>
               <th className="px-3 py-2 font-medium">上位組織</th>
               <th className="px-3 py-2 font-medium">在籍</th>
+              <th className="px-3 py-2 font-medium">配下</th>
               <th className="px-3 py-2 font-medium">組織名 / 部署コード / 職場コード</th>
               <th className="px-3 py-2 font-medium"> </th>
             </tr>
@@ -152,6 +158,7 @@ export default async function OrgCodesPage({
                   {u.parentId ? (nameById.get(u.parentId) ?? "—") : "（最上位）"}
                 </td>
                 <td className="px-3 py-1.5 tabular-nums text-[#707070]">{counts.get(u.id) ?? 0}</td>
+                <td className="px-3 py-1.5 tabular-nums text-[#707070]">{childCount.get(u.id) ?? 0}</td>
                 <td className="px-3 py-1.5">
                   <OrgCodeRowForm
                     id={u.id}
@@ -161,13 +168,18 @@ export default async function OrgCodesPage({
                   />
                 </td>
                 <td className="px-3 py-1.5 text-right">
-                  <OrgCodeDeleteForm id={u.id} name={u.name} />
+                  <OrgCodeDeleteForm
+                    id={u.id}
+                    name={u.name}
+                    childCount={childCount.get(u.id) ?? 0}
+                    parentName={u.parentId ? (nameById.get(u.parentId) ?? null) : null}
+                  />
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-[#909090]">
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-[#909090]">
                   該当する組織がありません。
                 </td>
               </tr>

@@ -89,30 +89,56 @@ function SaveButton() {
   );
 }
 
-function DeleteButton({ name }: { name: string }) {
+function DeleteButton({ confirmText, label }: { confirmText: string; label: string }) {
   const { pending } = useFormStatus();
   return (
     <button
       type="submit"
       disabled={pending}
       onClick={(e) => {
-        if (!window.confirm(`「${name}」を削除します。よろしいですか？`)) e.preventDefault();
+        if (!window.confirm(confirmText)) e.preventDefault();
       }}
-      className="inline-flex items-center gap-1 text-xs text-[#b91c1c] hover:underline disabled:opacity-50"
+      className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-[#b91c1c] hover:underline disabled:opacity-50"
     >
       <Trash2 className="h-3.5 w-3.5" />
-      削除
+      {label}
     </button>
   );
 }
 
-/** 1行ぶんの削除。所属者・配下がいる組織はサーバー側で拒否される。 */
-export function OrgCodeDeleteForm({ id, name }: { id: string; name: string }) {
+/**
+ * 1行ぶんの削除。所属者がいる組織はサーバー側で拒否される。
+ *
+ * 配下の組織があるときは、そのまま消すと配下が黙って最上位に浮き上がるので、
+ * 「配下を上へ移して削除」だけを出す。同じ名前の枠が二重にできてしまったときに、
+ * 中身（配下）を残したまま片方を畳めるようにするため。
+ */
+export function OrgCodeDeleteForm({
+  id,
+  name,
+  childCount,
+  parentName,
+}: {
+  id: string;
+  name: string;
+  childCount: number;
+  parentName: string | null;
+}) {
   const [state, formAction] = useActionState(deleteOrgUnitAction, {} as OrgActionState);
+  const hasKids = childCount > 0;
+  const dest = parentName ?? "最上位";
   return (
     <form action={formAction}>
       <input type="hidden" name="id" value={id} />
-      <DeleteButton name={name} />
+      {hasKids && <input type="hidden" name="moveChildren" value="1" />}
+      <DeleteButton
+        label={hasKids ? "配下を上へ移して削除" : "削除"}
+        confirmText={
+          hasKids
+            ? `「${name}」を削除し、配下の ${childCount} 件を「${dest}」へ移します。よろしいですか？`
+            : `「${name}」を削除します。よろしいですか？`
+        }
+      />
       {state.error && <p className="mt-1 text-xs text-[#b91c1c]">{state.error}</p>}
     </form>
   );
