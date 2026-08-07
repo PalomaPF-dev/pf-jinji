@@ -1,9 +1,11 @@
 "use client";
 
 import { useActionState } from "react";
-import { Upload } from "lucide-react";
+import { Trash2, Upload } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import {
+  portalPruneAction,
+  previewPortalPruneAction,
   previewPortalPushAction,
   pushPortalAction,
   type PortalPushState,
@@ -48,7 +50,13 @@ function Button({
 export default function PortalPushPanel() {
   const [preview, previewAction] = useActionState(previewPortalPushAction, {} as PortalPushState);
   const [push, pushAction] = useActionState(pushPortalAction, {} as PortalPushState);
+  const [prunePreview, prunePreviewAction] = useActionState(
+    previewPortalPruneAction,
+    {} as PortalPushState,
+  );
+  const [prune, pruneAction] = useActionState(portalPruneAction, {} as PortalPushState);
   const state = push.message || push.error || push.failures ? push : preview;
+  const pruneState = prune.message || prune.error ? prune : prunePreview;
 
   return (
     <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
@@ -137,6 +145,65 @@ export default function PortalPushPanel() {
           （部門長など最上位の人はこれで正しい）。それ以外は組織図で職務を確かめてください。
         </p>
       )}
+
+      {/* ポータルにしか居ない人の掃除。同期は「足す・直す」だけなので、
+          台帳から消えた人はここで消さないとポータルに残り続ける。 */}
+      <div className="mt-6 rounded-lg border border-[#f0d9d9] bg-[#fdf7f7] p-4">
+        <h3 className="mb-1 text-sm font-bold text-[#333333]">ポータルにしか居ない人を消す</h3>
+        <p className="mb-3 text-xs text-[#707070]">
+          同期は「足す・直す」だけなので、<strong>社員台帳から消えた人はポータルに残り続けます</strong>。
+          ここで社員台帳に無いユーザーをポータルの名簿から削除して、両方を揃えます。
+          <strong>ポータル管理のユーザーは消しません</strong>
+          （人事の台帳に載らない管理用のアカウントが含まれるため）。
+          <strong>各アプリ側のアカウントも消えません</strong>。
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={prunePreviewAction}>
+            <Button>消える人を確認</Button>
+          </form>
+          <form action={pruneAction}>
+            <Button
+              variant="primary"
+              confirm="社員台帳に無いユーザーをポータルの名簿から削除します。※各アプリ側のアカウントは削除されません。よろしいですか？"
+            >
+              <Trash2 className="h-4 w-4" />
+              ポータルから削除
+            </Button>
+          </form>
+        </div>
+
+        {pruneState.error && (
+          <p className="mt-3 rounded-lg bg-[#fdecec] px-3 py-2 text-sm text-[#b91c1c]">{pruneState.error}</p>
+        )}
+        {pruneState.message && (
+          <p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm text-[#555555]">{pruneState.message}</p>
+        )}
+
+        {pruneState.strays && pruneState.strays.length > 0 && (
+          <div className="mt-3 max-h-72 overflow-auto rounded-xl border border-[#e5e5e5] bg-white">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead className="sticky top-0">
+                <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
+                  <th className="px-3 py-2 font-medium">社員番号</th>
+                  <th className="px-3 py-2 font-medium">氏名</th>
+                  <th className="px-3 py-2 font-medium">権限</th>
+                  <th className="px-3 py-2 font-medium">部署</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pruneState.strays.map((u) => (
+                  <tr key={u.loginId} className="border-b border-[#f0f0f0] last:border-0">
+                    <td className="px-3 py-2 font-mono text-xs text-[#707070]">{u.loginId}</td>
+                    <td className="px-3 py-2 text-[#333333]">{u.name}</td>
+                    <td className="px-3 py-2 text-[#555555]">{u.role === "admin" ? "管理者" : "一般"}</td>
+                    <td className="px-3 py-2 text-[#555555]">{u.departmentName ?? "未設定"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

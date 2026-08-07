@@ -243,6 +243,112 @@ async function pushOnce(
   }
 }
 
+/** ポータルにしか居ない人（社員台帳に無いユーザー）。 */
+export interface PortalStrayUser {
+  loginId: string;
+  name: string;
+  role: string | null;
+  departmentName: string | null;
+}
+
+export interface PortalPruneResult {
+  /** 消える（消した）人数 */
+  users: number;
+  /** 実際に消した人数。下見のときは 0 */
+  deleted: number;
+  /** 下見だったか */
+  dryRun: boolean;
+  /** 一覧（ポータル側が上限200件で返す） */
+  list: PortalStrayUser[];
+  errors: { loginId: string; message: string }[];
+}
+
+/**
+ * ポータルにしか居ない人を消す（社員台帳を正としてポータルを揃える）。
+ *
+ * 社員は分けて送るので、削除は**全員ぶんの社員番号を持った1回**で行う。
+ * confirm を付けなければ下見だけで、ポータルは何も消さない。
+ *
+ * ポータル管理者（can_manage）は消さない。人事の台帳に載らない管理用の
+ * アカウントがそこに含まれるため、消すと管理画面が操作できなくなる。
+ */
+export async function prunePortalUsers(
+  payload: PortalEmployeePayload[],
+  options: { confirm?: boolean } = {},
+): Promise<PortalPruneResult> {
+  const empty: PortalPruneResult = { users: 0, deleted: 0, dryRun: true, list: [], errors: [] };
+  const key = (process.env.PF_PROVISION_KEY || "").trim();
+  if (!key) {
+    return { ...empty, errors: [{ loginId: "-", message: "PF_PROVISION_KEY が設定されていません。" }] };
+  }
+  if (payload.length === 0) {
+    return { ...empty, errors: [{ loginId: "-", message: "社員台帳が空のため、何もしませんでした。" }] };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${portalBaseUrl()}/api/hr-sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key,
+        prune: {
+          keepLoginIds: payload.map((p) => p.loginId),
+          ...(options.confirm ? { confirm: true } : {}),
+        },
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return {
+        ...empty,
+        errors: [{ loginId: "-", message: `ポータルが ${res.status} を返しました。${text.slice(0, 200)}` }],
+      };
+    }
+    const data = (await res.json().catch(() => null)) as {
+      prune?: {
+        ok?: boolean;
+        message?: string;
+        users?: number;
+        deleted?: number;
+        dryRun?: boolean;
+        list?: PortalStrayUser[];
+      };
+    } | null;
+    const p = data?.prune;
+    if (!p) {
+      return {
+        ...empty,
+        errors: [
+          {
+            loginId: "-",
+            message: "ポータルがこの操作に未対応です（受け口を新しいものへ更新してください）。",
+          },
+        ],
+      };
+    }
+    if (p.ok === false) {
+      return { ...empty, errors: [{ loginId: "-", message: p.message ?? "ポータル側で実行できませんでした。" }] };
+    }
+    return {
+      users: Number(p.users ?? 0),
+      deleted: Number(p.deleted ?? 0),
+      dryRun: p.dryRun !== false,
+      list: p.list ?? [],
+      errors: [],
+    };
+  } catch (e) {
+    const msg =
+      (e as Error).name === "AbortError" ? "ポータルへの接続がタイムアウトしました。" : (e as Error).message;
+    return { ...empty, errors: [{ loginId: "-", message: msg }] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** 結果を1行の日本語にまとめる（画面表示・監査ログ用）。 */
 export function describePushResult(r: PortalPushResult): string {
   if (r.sent === 0) return "連携対象がありませんでした。";

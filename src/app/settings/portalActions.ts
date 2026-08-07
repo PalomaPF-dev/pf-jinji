@@ -5,8 +5,10 @@ import { recordAudit } from "@/lib/audit";
 import {
   buildPortalUsers,
   describePushResult,
+  prunePortalUsers,
   pushToPortal,
   type PortalEmployeePayload,
+  type PortalStrayUser,
 } from "@/lib/portalPush";
 
 export interface PortalPushState {
@@ -16,6 +18,8 @@ export interface PortalPushState {
   preview?: PortalEmployeePayload[];
   /** 連携に失敗した社員 */
   failures?: { loginId: string; message: string }[];
+  /** ポータルにしか居ない人（社員台帳に無いユーザー） */
+  strays?: PortalStrayUser[];
 }
 
 /**
@@ -75,6 +79,62 @@ export async function pushPortalAction(): Promise<PortalPushState> {
     return {
       message: summary,
       failures: result.errors.length > 0 ? result.errors : undefined,
+    };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/**
+ * ポータルにしか居ない人の下見。実際には消さない。
+ *
+ * 社員台帳に無いユーザーは、退職済みで台帳から消した人・アプリ用に手で作った人
+ * などが混ざる。名前を見てから消せるように、確認と実行を分けている。
+ */
+export async function previewPortalPruneAction(): Promise<PortalPushState> {
+  await assertOwnerSession();
+  try {
+    const users = await buildPortalUsers();
+    const r = await prunePortalUsers(users);
+    if (r.errors.length > 0) return { error: r.errors[0].message };
+    if (r.users === 0) {
+      return { message: "ポータルにしか居ない人は居ません。名簿は社員台帳と一致しています。" };
+    }
+    return {
+      strays: r.list,
+      message:
+        `ポータルにしか居ない人が ${r.users} 名います。` +
+        `内容を確認してから「ポータルから削除」を実行してください` +
+        `（ポータル管理のユーザーは消えません）。`,
+    };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/** 社員台帳に無いユーザーをポータルから削除する（名簿を台帳に揃える）。 */
+export async function portalPruneAction(): Promise<PortalPushState> {
+  const s = await assertOwnerSession();
+  try {
+    const users = await buildPortalUsers();
+    const r = await prunePortalUsers(users, { confirm: true });
+    if (r.errors.length > 0) return { error: r.errors[0].message };
+
+    await recordAudit({
+      actorLoginId: s.grant.loginId,
+      actorName: s.grant.name,
+      action: "push_portal",
+      targetType: "portal",
+      targetLabel: "ポータルから社員台帳に無いユーザーを削除",
+      detail: { deleted: r.deleted, keep: users.length },
+    });
+
+    return {
+      message:
+        r.deleted === 0
+          ? "削除する人は居ませんでした。"
+          : `ポータルから ${r.deleted} 名を削除しました（各アプリ側のアカウントは残ります）。`,
+      strays: r.list,
     };
   } catch (e) {
     return { error: (e as Error).message };
