@@ -1,5 +1,6 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
+import { assignApprovers, findApproverByNo, findDeptHead } from "./approvers";
 import { toISODate } from "./format";
 import { buildTransferNo } from "./transferForm";
 import {
@@ -106,6 +107,8 @@ function mapApproval(r: any): TransferApproval {
     slot,
     label: TRANSFER_APPROVAL_SLOTS.find((s) => s.slot === slot)?.label ?? slot,
     seq: Number(r.seq ?? 0),
+    assigneeLoginId: r.assignee_login_id ?? null,
+    assigneeName: r.assignee_name ?? null,
     approverLoginId: r.approver_login_id ?? null,
     approverName: r.approver_name ?? null,
     decision: (r.decision as ApprovalDecision) ?? "pending",
@@ -397,7 +400,32 @@ export async function createTransfer(
       VALUES (${id}, ${s.slot}, ${i})
       ON CONFLICT (transfer_id, slot) DO NOTHING`;
   }
+  // 部門長は申請部署（対象者の現所属）から自動で当てる。役員は画面で社員番号を指定する。
+  await assignDeptHead(id, (input.fromOrgUnitId ?? (e.org_unit_id as string | null)) ?? null);
   return id;
+}
+
+/** 承認欄の「部門長」に、申請部署が属する部・工場の長を当てる。 */
+export async function assignDeptHead(transferId: string, orgUnitId: string | null): Promise<void> {
+  const head = await findDeptHead(orgUnitId);
+  await assignApprovers("jinji_transfer_approvals", "transfer_id", transferId, [
+    { slot: "dept_head", approver: head },
+  ]);
+}
+
+/** 承認欄の担当者を社員番号で指定する（役員など）。空文字なら未指定に戻す。 */
+export async function setApprovalAssignee(
+  transferId: string,
+  slot: string,
+  employeeNo: string,
+): Promise<{ name: string } | null> {
+  await ensureSchema();
+  const approver = employeeNo.trim() ? await findApproverByNo(employeeNo) : null;
+  if (employeeNo.trim() && !approver) {
+    throw new Error(`社員番号 ${employeeNo.trim()} の人が見つかりません。`);
+  }
+  await assignApprovers("jinji_transfer_approvals", "transfer_id", transferId, [{ slot, approver }]);
+  return approver ? { name: approver.name } : null;
 }
 
 // ===== 一括申請（別紙） =====
@@ -594,6 +622,8 @@ export async function decideApproval(
   approverLoginId: string,
   approverName: string,
   comment: string | null,
+  /** 誰の枠でも押せるか（ポータル管理者の代理押印）。 */
+  canActForOthers = false,
 ): Promise<TransferStatus> {
   await ensureSchema();
   const sql = getSql();
@@ -601,6 +631,16 @@ export async function decideApproval(
   if (cur.length === 0) throw new Error("対象が見つかりません。");
   if (normalizeTransferStatus(cur[0].status) !== "submitted") {
     throw new Error("申請中の申請書だけが承認・差戻できます。");
+  }
+
+  // 担当者を決めてある枠は、その人（かポータル管理者）だけが押せる。
+  // 決めていない枠は従来どおり誰でも押せる（紙の回覧に合わせた運用のため）。
+  const slotRow = await sql`
+    SELECT assignee_login_id FROM jinji_transfer_approvals
+    WHERE transfer_id = ${transferId} AND slot = ${slot} LIMIT 1`;
+  const assignee = (slotRow[0]?.assignee_login_id as string | null) ?? null;
+  if (assignee && assignee !== approverLoginId && !canActForOthers) {
+    throw new Error("この欄は担当の方（またはポータル管理者）だけが押せます。");
   }
 
   await sql`

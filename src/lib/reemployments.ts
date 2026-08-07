@@ -1,5 +1,6 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
+import { assignApprovers, findApproverByNo, findDeptHead } from "./approvers";
 import { toISODate } from "./format";
 import { buildReemploymentNo } from "./transferForm";
 import {
@@ -85,6 +86,8 @@ function mapApproval(r: any): ReemploymentApproval {
     slot,
     label: REEMPLOYMENT_APPROVAL_SLOTS.find((s) => s.slot === slot)?.label ?? slot,
     seq: Number(r.seq ?? 0),
+    assigneeLoginId: r.assignee_login_id ?? null,
+    assigneeName: r.assignee_name ?? null,
     approverLoginId: r.approver_login_id ?? null,
     approverName: r.approver_name ?? null,
     decision: (r.decision as ApprovalDecision) ?? "pending",
@@ -249,7 +252,32 @@ export async function createReemployment(
       VALUES (${id}, ${s.slot}, ${i})
       ON CONFLICT (reemployment_id, slot) DO NOTHING`;
   }
+  // 部門長は申請部署（対象者の所属）から自動で当てる。役員は画面で社員番号を指定する。
+  const emp = await sql`SELECT org_unit_id FROM jinji_employees WHERE id = ${input.employeeId} LIMIT 1`;
+  await assignApprovers("jinji_reemployment_approvals", "reemployment_id", id, [
+    {
+      slot: "dept_head",
+      approver: await findDeptHead((emp[0]?.org_unit_id as string | null) ?? null),
+    },
+  ]);
   return id;
+}
+
+/** 承認欄の担当者を社員番号で指定する（役員など）。空文字なら未指定に戻す。 */
+export async function setReemploymentAssignee(
+  reemploymentId: string,
+  slot: string,
+  employeeNo: string,
+): Promise<{ name: string } | null> {
+  await ensureSchema();
+  const approver = employeeNo.trim() ? await findApproverByNo(employeeNo) : null;
+  if (employeeNo.trim() && !approver) {
+    throw new Error(`社員番号 ${employeeNo.trim()} の人が見つかりません。`);
+  }
+  await assignApprovers("jinji_reemployment_approvals", "reemployment_id", reemploymentId, [
+    { slot, approver },
+  ]);
+  return approver ? { name: approver.name } : null;
 }
 
 /** 起案中・差戻の申請だけ編集できる（承認後に内容が変わると帳票と実態がずれるため）。 */
@@ -325,6 +353,8 @@ export async function decideReemploymentApproval(
   approverLoginId: string,
   approverName: string,
   comment: string | null,
+  /** 誰の枠でも押せるか（ポータル管理者の代理押印）。 */
+  canActForOthers = false,
 ): Promise<void> {
   await ensureSchema();
   const sql = getSql();
@@ -332,6 +362,15 @@ export async function decideReemploymentApproval(
   if (cur.length === 0) throw new Error("対象が見つかりません。");
   if (normalizeReemploymentStatus(cur[0].status) !== "submitted") {
     throw new Error("申請中の申請書だけが承認・差戻できます。");
+  }
+
+  // 担当を決めてある枠は、その人（かポータル管理者）だけが押せる。
+  const slotRow = await sql`
+    SELECT assignee_login_id FROM jinji_reemployment_approvals
+    WHERE reemployment_id = ${reemploymentId} AND slot = ${slot} LIMIT 1`;
+  const assignee = (slotRow[0]?.assignee_login_id as string | null) ?? null;
+  if (assignee && assignee !== approverLoginId && !canActForOthers) {
+    throw new Error("この欄は担当の方（またはポータル管理者）だけが押せます。");
   }
 
   await sql`

@@ -1,11 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Check, Send, Stamp, Trash2, Undo2 } from "lucide-react";
+import { Check, Send, Stamp, Trash2, Undo2, UserCog } from "lucide-react";
 import SubmitButton from "./SubmitButton";
 import {
   decideReemploymentApprovalAction,
   deleteReemploymentAction,
+  setReemploymentApproverAction,
   submitReemploymentAction,
   type ReemploymentActionState,
 } from "@/app/reemployments/actions";
@@ -76,6 +77,8 @@ export function ReemploymentApprovalPanel({
     {} as ReemploymentActionState,
   );
   const editable = reemployment.status === "submitted";
+  // 担当は承認が済むまでいつでも直せる（申請してから役員が決まることがあるため）
+  const canAssign = reemployment.status !== "approved";
 
   return (
     <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
@@ -96,6 +99,14 @@ export function ReemploymentApprovalPanel({
             className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[#e5e5e5] px-3 py-2"
           >
             <span className="w-24 shrink-0 text-sm font-medium text-[#555555]">{a.label}</span>
+            {a.assigneeName ? (
+              <span className="text-xs text-[#555555]">
+                担当 {a.assigneeName}
+                <span className="ml-1 font-mono text-[10px] text-[#a0a0a0]">{a.assigneeLoginId}</span>
+              </span>
+            ) : (
+              <span className="text-xs text-[#a0a0a0]">担当 未設定</span>
+            )}
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                 a.decision === "approved"
@@ -142,10 +153,51 @@ export function ReemploymentApprovalPanel({
                 </button>
               </form>
             )}
+            {canAssign && a.slot !== "applicant" && (
+              <div className="w-full">
+                <AssigneeForm id={reemployment.id} slot={a.slot} label={a.label} />
+              </div>
+            )}
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs text-[#909090]">
+        担当を決めた欄は、その人（またはポータル管理者）だけが押せます。
+        担当が未設定の欄はこれまでどおり誰でも押せます。
+      </p>
       <Notice state={state} />
     </section>
+  );
+}
+
+/** 承認欄の担当を社員番号で指定する。 */
+function AssigneeForm({ id, slot, label }: { id: string; slot: string; label: string }) {
+  const [state, action] = useActionState(
+    setReemploymentApproverAction,
+    {} as ReemploymentActionState,
+  );
+  return (
+    <form
+      action={action}
+      className="mt-1 flex flex-wrap items-center gap-1.5 border-t border-[#f4f4f4] pt-2"
+    >
+      <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="slot" value={slot} />
+      <UserCog className="h-3.5 w-3.5 text-[#a0a0a0]" />
+      <input
+        name="employeeNo"
+        placeholder="社員番号"
+        aria-label={`${label}の担当を社員番号で指定`}
+        className="w-28 rounded-lg border border-[#e5e5e5] px-2 py-1 text-xs outline-none focus:border-[#2563eb]"
+      />
+      <button
+        type="submit"
+        className="rounded-lg border border-[#e5e5e5] px-2 py-1 text-xs font-medium text-[#555555] hover:bg-[#f7f7f5]"
+      >
+        担当にする
+      </button>
+      {state.error && <span className="text-xs text-[#b91c1c]">{state.error}</span>}
+      {state.message && <span className="text-xs text-[#1c7a4d]">{state.message}</span>}
+    </form>
   );
 }

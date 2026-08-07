@@ -31,7 +31,7 @@ export default async function ReemploymentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
   const { id } = await params;
   const r = await getReemployment(id);
   if (!r) notFound();
@@ -87,7 +87,10 @@ export default async function ReemploymentDetailPage({
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {editable && <SubmitReemploymentForm id={r.id} />}
-          {editable && <DeleteReemploymentForm id={r.id} name={r.employeeName} />}
+          {/* 起案中・差戻は誰でも、申請中・承認済はポータル管理者だけ消せる */}
+          {(editable || s.grant.isOwner) && (
+            <DeleteReemploymentForm id={r.id} name={r.employeeName} />
+          )}
         </div>
       </div>
 

@@ -10,6 +10,7 @@ import PageHeader from "@/components/PageHeader";
 import {
   ApplyTransferForm,
   ApprovalPanel,
+  DeleteTransferForm,
   SubmitTransferForm,
 } from "@/components/TransferWorkflow";
 import { TRANSFER_KIND_LABEL } from "@/lib/types";
@@ -27,7 +28,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 /** 異動申請の詳細。状態に応じて申請・承認・発令の導線を出す。 */
 export default async function TransferDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireJinjiSession();
+  const s = await requireJinjiSession();
   const { id } = await params;
   const t = await getTransfer(id);
   if (!t) notFound();
@@ -96,6 +97,12 @@ export default async function TransferDetailPage({ params }: { params: Promise<{
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {editable && <SubmitTransferForm id={t.id} />}
           {t.status === "approved" && <ApplyTransferForm transfer={t} />}
+          {/* 発令済みは消せない（人事マスターへ反映済みのため）。
+              起案中・差戻は誰でも、申請中・承認済はポータル管理者だけ消せる */}
+          {t.status !== "issued" &&
+            (t.status === "draft" || t.status === "rejected" || s.grant.isOwner) && (
+              <DeleteTransferForm id={t.id} no={t.transferNo} name={t.employeeName} />
+            )}
         </div>
       </div>
 
