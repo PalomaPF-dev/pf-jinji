@@ -39,11 +39,11 @@ function Button({
 }
 
 /**
- * ポータルへの人事情報連携。
+ * ポータルへのユーザー同期。
  *
- * 人事管理が「人」と「組織」のマスター。ここから組織・人事情報・承認者を送る。
- * パスワードとアプリの利用権限（role / can_manage / 部署の apps）はポータルが
- * 持つ情報なので送らない。
+ * 送るのは「誰が居て、生きているか、その人の管理者は誰か」だけ。
+ * 部署・工場とアプリの割当、パスワードと権限（role / can_manage / apps）は
+ * ポータル側の運用なので触らない。人事情報（生年月日・入社日・役職・職務）も送らない。
  */
 export default function PortalPushPanel() {
   const [preview, previewAction] = useActionState(previewPortalPushAction, {} as PortalPushState);
@@ -52,16 +52,24 @@ export default function PortalPushPanel() {
 
   return (
     <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
-      <h2 className="mb-1 text-sm font-bold text-[#333333]">ポータルへの人事情報連携</h2>
-      <p className="mb-4 text-xs text-[#707070]">
-        この人事管理が持つ<strong>組織（部署・職場）・所属・役職・職務・入社日・雇用体系・在籍状態</strong>
-        と、社員ごとの<strong>管理者（承認者）</strong>・<strong>職場の長</strong>をポータルへ送り、
-        ポータル側を最新にします。ポータルはこれを受けて各業務アプリへ再連携するため、
-        異動が各アプリの部署にも反映されます。
-        <br />
-        パスワードとアプリの利用権限（ポータルの権限・部署へのアプリ割当）は
-        <strong>ポータルが持つ情報なので変更しません</strong>（上書きすると権限運用が壊れるため）。
+      <h2 className="mb-1 text-sm font-bold text-[#333333]">ポータルへのユーザー同期</h2>
+      <p className="mb-3 text-xs text-[#707070]">
+        社員台帳の人を、ポータルの<strong>ユーザー</strong>として同期します。送るのは
+        <strong>社員番号・氏名・在籍状態（退職日）</strong>と、
+        <strong>その人の管理者（承認者）</strong>だけです。
+        ポータルに居ない人は、パスワード未設定の招待状態でアカウントを作ります。
       </p>
+      <p className="mb-3 text-xs text-[#707070]">
+        <strong>送らないもの</strong>: 生年月日・入社日・雇用体系・役職・職務・部署・職場・メール。
+        部署や工場ごとのアプリの割当、パスワード、ポータルの権限（管理者・ポータル管理）も
+        ポータル側の運用なので触りません。
+      </p>
+      <div className="mb-4 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-xs text-[#707070]">
+        <strong>管理者（承認者）の決め方</strong>: 組織を上へ辿って、自分より上位の管理者が
+        最初に見つかった人です。管理者になる職務は
+        <strong>部門長 ＞ 工場長A ＞ 工場長B ＞ 室長 ＞ グループ長 ＝ 安全推進工場長室</strong>の6つ。
+        安全推進工場長室はグループ長と同じ高さなので、その人たちの管理者は工場長になります。
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <form action={previewAction}>
@@ -70,10 +78,10 @@ export default function PortalPushPanel() {
         <form action={pushAction}>
           <Button
             variant="primary"
-            confirm="人事情報をポータルへ送ります。ポータル側の社員情報が人事管理の内容で更新されます。よろしいですか？"
+            confirm="ポータルのユーザーを同期します。氏名・在籍状態・管理者が人事管理の内容で更新されます。よろしいですか？"
           >
             <Upload className="h-4 w-4" />
-            ポータルへ連携
+            ポータルへ同期
           </Button>
         </form>
       </div>
@@ -103,10 +111,8 @@ export default function PortalPushPanel() {
               <tr className="border-b border-[#e5e5e5] bg-[#fafafa] text-left text-xs text-[#707070]">
                 <th className="px-3 py-2 font-medium">社員番号</th>
                 <th className="px-3 py-2 font-medium">氏名</th>
-                <th className="px-3 py-2 font-medium">部署コード</th>
-                <th className="px-3 py-2 font-medium">職場コード</th>
-                <th className="px-3 py-2 font-medium">役職</th>
                 <th className="px-3 py-2 font-medium">在籍</th>
+                <th className="px-3 py-2 font-medium">管理者（承認者）</th>
               </tr>
             </thead>
             <tbody>
@@ -114,12 +120,10 @@ export default function PortalPushPanel() {
                 <tr key={p.loginId} className="border-b border-[#f0f0f0] last:border-0">
                   <td className="px-3 py-2 font-mono text-xs text-[#707070]">{p.loginId}</td>
                   <td className="px-3 py-2 text-[#333333]">{p.name}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-[#555555]">
-                    {p.departmentCode ?? <span className="text-[#c0392b]">未解決</span>}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-[#555555]">{p.workplaceCode ?? "—"}</td>
-                  <td className="px-3 py-2 text-[#555555]">{p.positionName ?? "—"}</td>
                   <td className="px-3 py-2 text-[#555555]">{EMPLOYMENT_STATUS_LABEL[p.status]}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#555555]">
+                    {p.managerLoginId ?? <span className="text-[#a06a12]">なし</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -127,10 +131,10 @@ export default function PortalPushPanel() {
         </div>
       )}
 
-      {preview.preview?.some((p) => !p.departmentCode) && (
+      {preview.preview?.some((p) => !p.managerLoginId) && (
         <p className="mt-2 text-xs text-[#a06a12]">
-          「未解決」の社員は、所属がポータルの部署に紐づいていません。組織図でポータル由来の
-          部署の配下に配置するか、ポータルの部署を同期してください。この社員の所属は送られません。
+          管理者が「なし」の人は、組織を上へ辿っても自分より上位の管理者が見つからなかった人です
+          （部門長など最上位の人はこれで正しい）。それ以外は組織図で職務を確かめてください。
         </p>
       )}
     </section>
