@@ -30,7 +30,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -487,6 +487,10 @@ async function buildSchema(): Promise<void> {
       sort             INTEGER NOT NULL DEFAULT 0,
       active           BOOLEAN NOT NULL DEFAULT true
     )`);
+  // 人事システムの「区分マスター」の区分をそのまま持つ（法令資格修了者・技能士 等）。
+  // アプリの category（国家/社内/技能/その他）は絞り込み用の粗い分類で、
+  // 人事システムの区分はそれより細かい。丸めずに原文を残す。
+  await safeDdl(() => sql`ALTER TABLE jinji_qualification_master ADD COLUMN IF NOT EXISTS group_name TEXT`);
   await safeDdl(() => sql`
     CREATE TABLE IF NOT EXISTS jinji_qualifications (
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -501,8 +505,22 @@ async function buildSchema(): Promise<void> {
       note           TEXT,
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+  // 資格取得状況（人事システムの明細）から取り込む項目。
+  //   code           … 資格コード（4桁）。マスターを消しても何の資格か分かるよう行にも持つ
+  //   certified_on   … 資格認定日、applied_from … 適用開始日
+  //   holder_role    … 「資格取得番号」列の中身。番号ではなく役割（有資格者/講師/代理人/解任）
+  //   allowance_paid … 手当支給区分
+  //   source         … 'import' なら取込で作った行。取り込み直すときはこれだけ入れ替える
+  //                    （画面から手で足した行を消さないため）
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS code TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS certified_on DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS applied_from DATE`);
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS holder_role TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS allowance_paid BOOLEAN`);
+  await safeDdl(() => sql`ALTER TABLE jinji_qualifications ADD COLUMN IF NOT EXISTS source TEXT`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_emp_idx ON jinji_qualifications(employee_id)`);
   await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_expiry_idx ON jinji_qualifications(expires_on)`);
+  await safeDdl(() => sql`CREATE INDEX IF NOT EXISTS jinji_qualifications_source_idx ON jinji_qualifications(source)`);
 
   // ===== 兼務 =====
   // 本務（jinji_employees.org_unit_id）とは別に持つ「もう一つの所属」。
