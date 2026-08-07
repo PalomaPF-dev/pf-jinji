@@ -73,7 +73,7 @@ export default async function HomePage() {
       listDueTransfers(today),
       listOrgUnits(),
       countExpiring(today),
-      listQualifications({ expiringOnly: true, today, withinDays: 90 }),
+      listQualifications({ expiringOnly: true, today, withinDays: 90, limit: 50 }),
       headcountByOrg({ scopeOrgIds: scope.orgUnitIds }),
     ]);
 
@@ -152,11 +152,11 @@ export default async function HomePage() {
         <section className="rounded-xl border border-[#e5e5e5] bg-white p-5">
           <h2 className="mb-1 text-sm font-bold text-[#333333]">期限が近い資格</h2>
           <p className="mb-3 text-xs text-[#707070]">期限切れ、または90日以内に切れるものです。</p>
-          {expiringList.length === 0 ? (
+          {expiringList.rows.length === 0 ? (
             <p className="text-sm text-[#909090]">ありません。</p>
           ) : (
             <ul className="space-y-2">
-              {expiringList.slice(0, 8).map((q) => (
+              {expiringList.rows.slice(0, 8).map((q) => (
                 <li
                   key={q.id}
                   className="flex flex-wrap items-center gap-2 rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm"
@@ -168,10 +168,10 @@ export default async function HomePage() {
                   </span>
                 </li>
               ))}
-              {expiringList.length > 8 && (
+              {expiringList.total > 8 && (
                 <li className="text-xs text-[#909090]">
                   <Link href="/qualifications?expiring=1" className="text-[#2563eb] hover:underline">
-                    ほか {expiringList.length - 8} 件を見る
+                    ほか {expiringList.total - 8} 件を見る
                   </Link>
                 </li>
               )}

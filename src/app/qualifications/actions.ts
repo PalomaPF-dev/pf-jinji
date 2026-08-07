@@ -14,11 +14,23 @@ import {
 } from "@/lib/qualifications";
 import { getEmployee } from "@/lib/employees";
 import { normalizeQualificationCategory } from "@/lib/types";
+import { readXlsx } from "@/lib/xlsx";
+import {
+  importQualifications,
+  looksLikeQualificationFile,
+  type QualificationImportResult,
+} from "@/lib/qualificationImport";
 
 export interface QualificationActionState {
   error?: string;
   message?: string;
   values?: FormValues;
+}
+
+export interface QualificationImportState {
+  error?: string;
+  message?: string;
+  result?: QualificationImportResult;
 }
 
 function str(form: FormData, key: string): string {
@@ -88,6 +100,63 @@ export async function deleteQualificationAction(
   });
   revalidatePath("/qualifications");
   return { message: "削除しました。" };
+}
+
+/**
+ * 資格取得状況（人事システムのExcel）の取込。
+ * 前回の取込ぶんを入れ替えるので、監査ログに件数を残す。
+ */
+export async function importQualificationsAction(
+  _prev: QualificationImportState,
+  form: FormData,
+): Promise<QualificationImportState> {
+  const s = await assertJinjiSession();
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "ファイルを選んでください（Excel）。" };
+  }
+  if (file.size > 15 * 1024 * 1024) return { error: "ファイルが大きすぎます（15MBまで）。" };
+  if (!/\.xlsx$/i.test(file.name)) {
+    return { error: "Excel（.xlsx）を入れてください。CSVに変換すると社員番号の先頭ゼロが落ちます。" };
+  }
+
+  let result: QualificationImportResult;
+  try {
+    const sheets = readXlsx(Buffer.from(await file.arrayBuffer()));
+    if (!looksLikeQualificationFile(sheets)) {
+      return { error: "資格取得状況のファイルではないようです（「社員番号・資格コード・資格取得日」の見出しが見つかりません）。" };
+    }
+    result = await importQualifications(sheets);
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_employee",
+    targetType: "qualification",
+    targetLabel: `資格取得状況の取込（${file.name}）`,
+    detail: {
+      total: result.total,
+      created: result.created,
+      removed: result.removed,
+      mastersCreated: result.mastersCreated,
+      missing: result.missing.length,
+    },
+  });
+  revalidatePath("/qualifications");
+  revalidatePath("/settings");
+
+  const parts = [
+    `明細 ${result.total} 行`,
+    `登録 ${result.created} 件`,
+    result.removed ? `前回ぶん ${result.removed} 件を入れ替え` : "",
+    `資格マスター 新規 ${result.mastersCreated} / 更新 ${result.mastersUpdated}`,
+    result.missing.length ? `台帳に居ない社員 ${result.missing.length} 名は取込なし` : "",
+    result.ungrouped.length ? `区分が付かない資格 ${result.ungrouped.length} 種` : "",
+  ].filter(Boolean);
+  return { message: `資格取得状況を取り込みました（${parts.join(" / ")}）。`, result };
 }
 
 /** 資格マスターの追加（設定画面）。マスターの増減は責任者のみ。 */

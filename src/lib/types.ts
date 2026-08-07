@@ -577,6 +577,8 @@ export interface QualificationMaster {
   code: string;
   name: string;
   category: QualificationCategory;
+  /** 人事システムの区分（法令資格修了者・技能士 等）。取込で入る */
+  groupName: string | null;
   renewalRequired: boolean;
   /** 更新間隔（月）。renewalRequired のときだけ意味を持つ */
   renewalMonths: number | null;
@@ -593,8 +595,20 @@ export interface Qualification {
   masterId: string | null;
   name: string;
   category: QualificationCategory;
+  /** 人事システムの区分（マスターから引く）。無ければ null */
+  groupName: string | null;
+  /** 資格コード（4桁）。取込で入る */
+  code: string | null;
   acquiredOn: string | null;
   expiresOn: string | null;
+  /** 資格認定日 */
+  certifiedOn: string | null;
+  /** 適用開始日 */
+  appliedFrom: string | null;
+  /** 「資格取得番号」列の中身。番号ではなく役割（有資格者 / 講師 / 代理人 / 解任） */
+  holderRole: string | null;
+  /** 手当支給区分。未設定は null */
+  allowancePaid: boolean | null;
   certificateNo: string | null;
   issuer: string | null;
   note: string | null;

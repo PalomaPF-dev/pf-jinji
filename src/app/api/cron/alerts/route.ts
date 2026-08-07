@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     const today = todayJST();
     const leadDays = alertLeadDays();
 
-    const quals = await listQualifications({});
+    const quals = (await listQualifications({ limit: 5000 })).rows;
     const expired: { employee: string; name: string; expiresOn: string; daysOver: number }[] = [];
     const upcoming: { employee: string; name: string; expiresOn: string; daysLeft: number }[] = [];
 
