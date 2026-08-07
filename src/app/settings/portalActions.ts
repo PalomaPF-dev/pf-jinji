@@ -20,6 +20,8 @@ export interface PortalPushState {
   failures?: { loginId: string; message: string }[];
   /** ポータルにしか居ない人（社員台帳に無いユーザー） */
   strays?: PortalStrayUser[];
+  /** ポータルに無かった部署コード・職場コード（CSVの取込漏れ） */
+  unknownCodes?: { departments: string[]; workplaces: string[] };
 }
 
 /**
@@ -67,6 +69,7 @@ export async function pushPortalAction(): Promise<PortalPushState> {
         created: result.created,
         updated: result.updated,
         approverSet: result.approverSet,
+        affiliationSet: result.affiliationSet,
         skipped: result.skipped,
         reprovisioned: result.reprovisioned,
         errorCount: result.errors.length,
@@ -79,6 +82,10 @@ export async function pushPortalAction(): Promise<PortalPushState> {
     return {
       message: summary,
       failures: result.errors.length > 0 ? result.errors : undefined,
+      unknownCodes:
+        result.unknownDepartmentCodes.length + result.unknownWorkplaceCodes.length > 0
+          ? { departments: result.unknownDepartmentCodes, workplaces: result.unknownWorkplaceCodes }
+          : undefined,
     };
   } catch (e) {
     return { error: (e as Error).message };

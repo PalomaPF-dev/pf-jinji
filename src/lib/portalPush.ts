@@ -1,6 +1,7 @@
 import { getSql } from "./neon";
 import { ensureSchema } from "./schema";
 import { resolveManagers } from "./portalManagers";
+import { mergesIntoParent } from "./orgChart";
 import { toISODate } from "./format";
 import { normalizeEmploymentStatus, type EmploymentStatus } from "./types";
 
@@ -31,9 +32,13 @@ import { normalizeEmploymentStatus, type EmploymentStatus } from "./types";
 /**
  * ポータルへ送る1人分。
  *
- * 送るのは**アカウントの生き死にと、承認フローに要るものだけ**。
- * 生年月日・入社日・役職・職務・部署・職場は送らない（人事情報はポータルに
- * 置かない方針のため）。部署・工場ごとのアプリ割当もポータル側の運用に任せる。
+ * 送るのは**アカウントの生き死にと、承認フローに要るもの、そして所属**。
+ * 生年月日・入社日・役職・職務は送らない（人事情報はポータルに置かない方針）。
+ *
+ * 所属（部署・職場）のコードは送るが、**部署・職場そのものは作らない**。
+ * ポータルに同じコードの部署・職場があるときだけ引き当てる。
+ * 「誰がどこに所属するか」は人事の情報で、「その部署でどのアプリを使えるか」は
+ * ポータルの情報、という分け方にしている。
  */
 export interface PortalEmployeePayload {
   loginId: string;
@@ -43,6 +48,10 @@ export interface PortalEmployeePayload {
   retireDate: string | null;
   /** 管理者（承認者）の社員番号。組織と職務から決める（portalManagers.ts） */
   managerLoginId: string | null;
+  /** 所属する部・工場のコード（4桁）。ポータルに無ければ引き当てない */
+  departmentCode: string | null;
+  /** 所属する職場のコード（8桁）。ポータルに無ければ引き当てない */
+  workplaceCode: string | null;
 }
 
 export interface PortalPushResult {
@@ -55,6 +64,12 @@ export interface PortalPushResult {
   reprovisioned: number;
   /** 承認者を設定した件数 */
   approverSet: number;
+  /** 所属（部署・職場）が入った件数 */
+  affiliationSet: number;
+  /** ポータルに無かった部署コード（部署CSVの取込漏れ） */
+  unknownDepartmentCodes: string[];
+  /** ポータルに無かった職場コード（職場CSVの取込漏れ） */
+  unknownWorkplaceCodes: string[];
   errors: { loginId: string; message: string }[];
 }
 
@@ -63,29 +78,77 @@ function portalBaseUrl(): string {
 }
 
 /**
+ * 組織ごとに「その人が属する部・工場のコード」と「職場のコード」を引けるようにする。
+ *
+ * 部・工場＝本部の直下（第2階層）。職場＝それより下（第3・第4階層）。
+ * 「大口工場長」のように工場の枠へ統合される組織は、工場そのものとして扱い、
+ * 職場コードは付けない（ポータル側では部付け＝職場なしになる）。
+ */
+async function buildOrgCodeMap(): Promise<
+  Map<string, { departmentCode: string | null; workplaceCode: string | null }>
+> {
+  const sql = getSql();
+  const units: any[] = await sql`
+    SELECT id, parent_id, name, dept_code, workplace_code FROM jinji_org_units`;
+  const byId = new Map(units.map((u) => [u.id as string, u]));
+
+  const out = new Map<string, { departmentCode: string | null; workplaceCode: string | null }>();
+  for (const u of units) {
+    // 本部の直下（＝部・工場）まで遡る。途中の枠が職場になる。
+    const chain: any[] = [];
+    let cur: any = u;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur.id as string)) {
+      seen.add(cur.id as string);
+      chain.push(cur);
+      const parent = cur.parent_id ? byId.get(cur.parent_id as string) : null;
+      if (!parent) break; // cur が本部
+      if (!parent.parent_id) break; // 親が本部＝cur が部・工場
+      cur = parent;
+    }
+    const frame = chain[chain.length - 1]; // 部・工場（本部そのものの場合もある）
+    const isFrame = frame && frame.id === u.id;
+    const departmentCode = (frame?.dept_code as string | null) ?? null;
+    // 工場の枠へ統合される組織（「大口工場長」など）は職場にしない
+    const merged = !isFrame && frame && mergesIntoParent(frame.name as string, u.name as string);
+    out.set(u.id as string, {
+      departmentCode,
+      workplaceCode: isFrame || merged ? null : ((u.workplace_code as string | null) ?? null),
+    });
+  }
+  return out;
+}
+
+/**
  * 連携対象（ポータルのユーザー）を組み立てる。
  *
- * 部署・工場はポータル側で持つので送らない。ここで作るのは
- * 「誰が居て、生きているか、その人の管理者は誰か」だけ。
- * 管理者は組織と職務から決める（portalManagers.ts）。
+ * 「誰が居て、生きているか、その人の管理者は誰か、どこに所属するか」。
+ * 所属はコードだけを送り、ポータルに同じコードの部署・職場があるときだけ
+ * 引き当てられる（部署・職場そのものは作らない）。
  */
 export async function buildPortalUsers(): Promise<PortalEmployeePayload[]> {
   await ensureSchema();
   const sql = getSql();
-  const [rows, managers] = await Promise.all([
+  const [rows, managers, orgCodes] = await Promise.all([
     sql`
-      SELECT employee_no, name, status, retire_date
+      SELECT employee_no, name, status, retire_date, org_unit_id
       FROM jinji_employees
       ORDER BY employee_no ASC`,
     resolveManagers(),
+    buildOrgCodeMap(),
   ]);
-  return (rows as any[]).map((r) => ({
-    loginId: r.employee_no as string,
-    name: r.name as string,
-    status: normalizeEmploymentStatus(r.status),
-    retireDate: toISODate(r.retire_date),
-    managerLoginId: managers.get(r.employee_no as string) ?? null,
-  }));
+  return (rows as any[]).map((r) => {
+    const org = r.org_unit_id ? orgCodes.get(r.org_unit_id as string) : null;
+    return {
+      loginId: r.employee_no as string,
+      name: r.name as string,
+      status: normalizeEmploymentStatus(r.status),
+      retireDate: toISODate(r.retire_date),
+      managerLoginId: managers.get(r.employee_no as string) ?? null,
+      departmentCode: org?.departmentCode ?? null,
+      workplaceCode: org?.workplaceCode ?? null,
+    };
+  });
 }
 
 /** 旧名。呼び出し側を一度に直せないので残してある。 */
@@ -122,7 +185,11 @@ export interface PortalPushOptions {
  * ポータルへ送る。人数が多いときは分けて送り、結果を足し合わせる。
  *
  * 1回で全員を送ると、ポータル側の実行時間・本文サイズの上限に当たる。
- * 組織は最初の1回だけ一緒に送る（部署・職場が無いと社員の所属を解決できないため）。
+ *
+ * 分けて送ると、**先の回では管理者本人がまだポータルに居ない**ことがあり、
+ * その人の承認者が決まらないまま終わる。全員を送り終えてからもう一巡すると
+ * 全員が揃った状態で引けるので、2巡目を自動で回す（2巡目は所属も氏名も
+ * 同じ値になるため、承認者だけが埋まる）。
  */
 export async function pushToPortal(
   payload: PortalEmployeePayload[],
@@ -147,11 +214,28 @@ export async function pushToPortal(
         skipped: total.skipped + r.skipped,
         reprovisioned: total.reprovisioned + r.reprovisioned,
         approverSet: total.approverSet + r.approverSet,
+        affiliationSet: total.affiliationSet + r.affiliationSet,
+        unknownDepartmentCodes: [
+          ...new Set([...total.unknownDepartmentCodes, ...r.unknownDepartmentCodes]),
+        ],
+        unknownWorkplaceCodes: [
+          ...new Set([...total.unknownWorkplaceCodes, ...r.unknownWorkplaceCodes]),
+        ],
         errors: [...total.errors, ...r.errors],
       };
     }
     // 接続断・鍵の未設定など、続けても同じ結果になる失敗は打ち切る
     if (r.sent === 0 && r.errors.length > 0 && r.created + r.updated === 0) break;
+  }
+
+  // 2巡目。管理者が後の回で作られたために決まらなかった人を埋める。
+  // 数えるのは承認者だけ（人数や新規件数を二重に足さない）。
+  if (chunks.length > 1 && total && total.errors.length === 0) {
+    for (const chunk of chunks) {
+      const r = await pushOnce(chunk, options);
+      total.approverSet += r.approverSet;
+      if (r.errors.length > 0) break;
+    }
   }
   return total!;
 }
@@ -167,6 +251,9 @@ async function pushOnce(
     skipped: 0,
     reprovisioned: 0,
     approverSet: 0,
+    affiliationSet: 0,
+    unknownDepartmentCodes: [],
+    unknownWorkplaceCodes: [],
     errors: [],
   };
   if (payload.length === 0) return empty;
@@ -214,6 +301,9 @@ async function pushOnce(
         reprovisioned?: boolean;
         approverSet?: boolean;
       }[];
+      affiliationSet?: number;
+      unknownDepartmentCodes?: string[];
+      unknownWorkplaceCodes?: string[];
     } | null;
     const results = data?.results ?? [];
 
@@ -224,6 +314,9 @@ async function pushOnce(
       skipped: 0,
       reprovisioned: 0,
       approverSet: 0,
+      affiliationSet: Number(data?.affiliationSet ?? 0),
+      unknownDepartmentCodes: data?.unknownDepartmentCodes ?? [],
+      unknownWorkplaceCodes: data?.unknownWorkplaceCodes ?? [],
       errors: [],
     };
     for (const r of results) {
@@ -355,6 +448,7 @@ export function describePushResult(r: PortalPushResult): string {
   const parts: string[] = [`ユーザー ${r.sent} 件`];
   if (r.created) parts.push(`アカウント新規 ${r.created} 件`);
   if (r.updated) parts.push(`更新 ${r.updated} 件`);
+  if (r.affiliationSet) parts.push(`所属 ${r.affiliationSet} 件`);
   if (r.approverSet) parts.push(`承認者 ${r.approverSet} 件`);
   if (r.skipped) parts.push(`対象外 ${r.skipped} 件`);
   if (r.errors.length) parts.push(`失敗 ${r.errors.length} 件`);
