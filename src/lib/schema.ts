@@ -30,7 +30,7 @@ let schemaReady: Promise<void> | null = null;
  * 上げ忘れると、新しい列やテーブルが本番に作られないまま
  * 「column ... does not exist」で落ちる。気づいたらこの数字を上げれば直る。
  */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /**
  * すでに最新版まで作成済みかを、1回の問い合わせで確かめる。
@@ -301,6 +301,10 @@ async function buildSchema(): Promise<void> {
       comment           TEXT,
       UNIQUE (transfer_id, slot)
     )`);
+  // 誰が承認する枠かを先に決めておく（部門長は申請部署から自動、役員は社員番号で指定）。
+  // approver_* は「実際に押した人」なので別に持つ。代理で押したことが分かるようにするため。
+  await safeDdl(() => sql`ALTER TABLE jinji_transfer_approvals ADD COLUMN IF NOT EXISTS assignee_login_id TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_transfer_approvals ADD COLUMN IF NOT EXISTS assignee_name TEXT`);
 
   // 異動申請番号の年度連番（"J26-001" = プレフィックス + 西暦下2桁 + 連番）
   // kind 列で帳票の種類ごとに別の連番を持つ（異動 J / 継続雇用 R）。
@@ -401,6 +405,8 @@ async function buildSchema(): Promise<void> {
       comment           TEXT,
       UNIQUE (reemployment_id, slot)
     )`);
+  await safeDdl(() => sql`ALTER TABLE jinji_reemployment_approvals ADD COLUMN IF NOT EXISTS assignee_login_id TEXT`);
+  await safeDdl(() => sql`ALTER TABLE jinji_reemployment_approvals ADD COLUMN IF NOT EXISTS assignee_name TEXT`);
 
   // ===== 人事考課 =====
   await safeDdl(() => sql`

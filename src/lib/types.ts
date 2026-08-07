@@ -443,6 +443,10 @@ export interface TransferApproval {
   slot: TransferApprovalSlot;
   label: string;
   seq: number;
+  /** この枠を押す人（部門長は申請部署から自動、役員は社員番号で指定） */
+  assigneeLoginId: string | null;
+  assigneeName: string | null;
+  /** 実際に押した人。代理で押されたことが分かるよう担当者とは別に持つ */
   approverLoginId: string | null;
   approverName: string | null;
   decision: ApprovalDecision;
@@ -667,6 +671,9 @@ export interface ReemploymentApproval {
   slot: ReemploymentApprovalSlot;
   label: string;
   seq: number;
+  /** この枠を押す人（部門長は申請部署から自動、役員は社員番号で指定） */
+  assigneeLoginId: string | null;
+  assigneeName: string | null;
   approverLoginId: string | null;
   approverName: string | null;
   decision: ApprovalDecision;

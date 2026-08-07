@@ -9,7 +9,9 @@ import {
   createBulkTransfer,
   createTransfer,
   decideApproval,
+  assignDeptHead,
   deleteTransfer,
+  setApprovalAssignee,
   getTransfer,
   listTransferItems,
   submitTransfer,
@@ -363,7 +365,15 @@ export async function decideApprovalAction(
 
   let next: string;
   try {
-    next = await decideApproval(id, slot, decision, s.grant.loginId, s.grant.name, nullable(form, "comment"));
+    next = await decideApproval(
+      id,
+      slot,
+      decision,
+      s.grant.loginId,
+      s.grant.name,
+      nullable(form, "comment"),
+      s.grant.isOwner,
+    );
   } catch (e) {
     return { error: (e as Error).message };
   }
@@ -486,4 +496,67 @@ export async function deleteTransferAction(
   });
   revalidatePath("/transfers");
   redirect("/transfers");
+}
+
+/**
+ * 承認欄の担当者を決める。
+ *
+ * 部門長は申請部署から自動で入るが、兼任や代理で違う人になることがあるので
+ * ここで直せるようにしてある。役員は部署から機械的に決まらないので社員番号で指定する。
+ */
+export async function setApproverAction(
+  _prev: TransferActionState,
+  form: FormData,
+): Promise<TransferActionState> {
+  const s = await assertJinjiSession();
+  const id = str(form, "id");
+  const slot = str(form, "slot");
+  if (!TRANSFER_APPROVAL_SLOTS.some((x) => x.slot === slot)) {
+    return { error: "承認欄の指定が不正です。" };
+  }
+  const t = await getTransfer(id);
+  if (!t) return { error: "対象が見つかりません。" };
+  if (t.status === "issued") return { error: "発令済みの申請書は変更できません。" };
+
+  let set: { name: string } | null;
+  try {
+    set = await setApprovalAssignee(id, slot, str(form, "employeeNo"));
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_transfer",
+    targetType: "transfer",
+    targetId: id,
+    targetLabel: `${t.transferNo} ${t.employeeName}`,
+    detail: { slot, assignee: set?.name ?? null },
+  });
+  revalidatePath(`/transfers/${id}`);
+  return { message: set ? `${set.name} さんを担当に設定しました。` : "担当を外しました。" };
+}
+
+/** 部門長を申請部署から当て直す（所属を直したあとなどに使う）。 */
+export async function refreshDeptHeadAction(
+  _prev: TransferActionState,
+  form: FormData,
+): Promise<TransferActionState> {
+  const s = await assertJinjiSession();
+  const id = str(form, "id");
+  const t = await getTransfer(id);
+  if (!t) return { error: "対象が見つかりません。" };
+  if (t.status === "issued") return { error: "発令済みの申請書は変更できません。" };
+  await assignDeptHead(id, t.fromOrgUnitId);
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_transfer",
+    targetType: "transfer",
+    targetId: id,
+    targetLabel: `${t.transferNo} ${t.employeeName}`,
+    detail: { event: "refreshDeptHead" },
+  });
+  revalidatePath(`/transfers/${id}`);
+  return { message: "部門長を申請部署から当て直しました。" };
 }

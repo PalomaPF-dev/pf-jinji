@@ -8,6 +8,7 @@ import {
   createReemployment,
   decideReemploymentApproval,
   deleteReemployment,
+  setReemploymentAssignee,
   getReemployment,
   submitReemployment,
   updateReemployment,
@@ -193,6 +194,7 @@ export async function decideReemploymentApprovalAction(
       s.grant.loginId,
       s.grant.name,
       str(form, "comment") || null,
+      s.grant.isOwner,
     );
   } catch (e) {
     return { error: (e as Error).message };
@@ -236,4 +238,41 @@ export async function deleteReemploymentAction(
   });
   revalidatePath("/reemployments");
   redirect("/reemployments");
+}
+
+
+/**
+ * 承認欄の担当者を決める。
+ * 部門長は申請部署から自動で入るが、役員などは社員番号で指定する。
+ */
+export async function setReemploymentApproverAction(
+  _prev: ReemploymentActionState,
+  form: FormData,
+): Promise<ReemploymentActionState> {
+  const s = await assertJinjiSession();
+  const id = str(form, "id");
+  const slot = str(form, "slot");
+  if (!REEMPLOYMENT_APPROVAL_SLOTS.some((x) => x.slot === slot)) {
+    return { error: "承認欄の指定が不正です。" };
+  }
+  const r = await getReemployment(id);
+  if (!r) return { error: "対象が見つかりません。" };
+
+  let set: { name: string } | null;
+  try {
+    set = await setReemploymentAssignee(id, slot, str(form, "employeeNo"));
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+  await recordAudit({
+    actorLoginId: s.grant.loginId,
+    actorName: s.grant.name,
+    action: "update_reemployment",
+    targetType: "reemployment",
+    targetId: id,
+    targetLabel: `${r.docNo} ${r.employeeName}`,
+    detail: { slot, assignee: set?.name ?? null },
+  });
+  revalidatePath(`/reemployments/${id}`);
+  return { message: set ? `${set.name} さんを担当に設定しました。` : "担当を外しました。" };
 }
