@@ -52,6 +52,8 @@ export interface PortalEmployeePayload {
   departmentCode: string | null;
   /** 所属する職場のコード（8桁）。ポータルに無ければ引き当てない */
   workplaceCode: string | null;
+  /** 誰かの管理者（承認者）になっている人。ポータルで管理者権限を付ける */
+  isApprover: boolean;
 }
 
 export interface PortalPushResult {
@@ -66,6 +68,8 @@ export interface PortalPushResult {
   approverSet: number;
   /** 所属（部署・職場）が入った件数 */
   affiliationSet: number;
+  /** 管理者権限を付けた件数 */
+  adminGranted: number;
   /** ポータルに無かった部署コード（部署CSVの取込漏れ） */
   unknownDepartmentCodes: string[];
   /** ポータルに無かった職場コード（職場CSVの取込漏れ） */
@@ -137,16 +141,22 @@ export async function buildPortalUsers(): Promise<PortalEmployeePayload[]> {
     resolveManagers(),
     buildOrgCodeMap(),
   ]);
+  // 誰かの管理者になっている人の社員番号。ポータルでは承認者に管理者権限が要る
+  // （承認者の指定は管理者権限のユーザーにしかできない）ので、ここで印を付けて送る。
+  const approvers = new Set(managers.values());
+
   return (rows as any[]).map((r) => {
     const org = r.org_unit_id ? orgCodes.get(r.org_unit_id as string) : null;
+    const no = r.employee_no as string;
     return {
-      loginId: r.employee_no as string,
+      loginId: no,
       name: r.name as string,
       status: normalizeEmploymentStatus(r.status),
       retireDate: toISODate(r.retire_date),
-      managerLoginId: managers.get(r.employee_no as string) ?? null,
+      managerLoginId: managers.get(no) ?? null,
       departmentCode: org?.departmentCode ?? null,
       workplaceCode: org?.workplaceCode ?? null,
+      isApprover: approvers.has(no),
     };
   });
 }
@@ -215,6 +225,7 @@ export async function pushToPortal(
         reprovisioned: total.reprovisioned + r.reprovisioned,
         approverSet: total.approverSet + r.approverSet,
         affiliationSet: total.affiliationSet + r.affiliationSet,
+        adminGranted: total.adminGranted + r.adminGranted,
         unknownDepartmentCodes: [
           ...new Set([...total.unknownDepartmentCodes, ...r.unknownDepartmentCodes]),
         ],
@@ -234,6 +245,7 @@ export async function pushToPortal(
     for (const chunk of chunks) {
       const r = await pushOnce(chunk, options);
       total.approverSet += r.approverSet;
+      total.adminGranted += r.adminGranted;
       if (r.errors.length > 0) break;
     }
   }
@@ -252,6 +264,7 @@ async function pushOnce(
     reprovisioned: 0,
     approverSet: 0,
     affiliationSet: 0,
+    adminGranted: 0,
     unknownDepartmentCodes: [],
     unknownWorkplaceCodes: [],
     errors: [],
@@ -302,6 +315,7 @@ async function pushOnce(
         approverSet?: boolean;
       }[];
       affiliationSet?: number;
+      adminGranted?: number;
       unknownDepartmentCodes?: string[];
       unknownWorkplaceCodes?: string[];
     } | null;
@@ -315,6 +329,7 @@ async function pushOnce(
       reprovisioned: 0,
       approverSet: 0,
       affiliationSet: Number(data?.affiliationSet ?? 0),
+      adminGranted: Number(data?.adminGranted ?? 0),
       unknownDepartmentCodes: data?.unknownDepartmentCodes ?? [],
       unknownWorkplaceCodes: data?.unknownWorkplaceCodes ?? [],
       errors: [],
@@ -449,6 +464,7 @@ export function describePushResult(r: PortalPushResult): string {
   if (r.created) parts.push(`アカウント新規 ${r.created} 件`);
   if (r.updated) parts.push(`更新 ${r.updated} 件`);
   if (r.affiliationSet) parts.push(`所属 ${r.affiliationSet} 件`);
+  if (r.adminGranted) parts.push(`管理者権限 ${r.adminGranted} 件`);
   if (r.approverSet) parts.push(`承認者 ${r.approverSet} 件`);
   if (r.skipped) parts.push(`対象外 ${r.skipped} 件`);
   if (r.errors.length) parts.push(`失敗 ${r.errors.length} 件`);

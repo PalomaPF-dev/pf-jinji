@@ -70,6 +70,7 @@ export async function pushPortalAction(): Promise<PortalPushState> {
         updated: result.updated,
         approverSet: result.approverSet,
         affiliationSet: result.affiliationSet,
+        adminGranted: result.adminGranted,
         skipped: result.skipped,
         reprovisioned: result.reprovisioned,
         errorCount: result.errors.length,

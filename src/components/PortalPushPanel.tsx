@@ -113,6 +113,10 @@ export default function PortalPushPanel() {
         最初に見つかった人です。管理者になる職務は
         <strong>部門長 ＞ 工場長A ＞ 工場長B ＞ 室長 ＞ グループ長 ＝ 安全推進工場長室</strong>の6つ。
         安全推進工場長室はグループ長と同じ高さなので、その人たちの管理者は工場長になります。
+        <br />
+        誰かの承認者になっている人には、ポータルの<strong>管理者権限</strong>を付けます
+        （ポータルは承認者に管理者権限を求めるため）。<strong>権限を外すことはしません</strong>。
+        「ポータル管理」（管理画面に入れる権限）には触れません。
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
