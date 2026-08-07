@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Trash2, Upload } from "lucide-react";
+import { Download, Trash2, Upload } from "lucide-react";
 import { useFormStatus } from "react-dom";
 import {
   portalPruneAction,
@@ -63,15 +63,51 @@ export default function PortalPushPanel() {
       <h2 className="mb-1 text-sm font-bold text-[#333333]">ポータルへのユーザー同期</h2>
       <p className="mb-3 text-xs text-[#707070]">
         社員台帳の人を、ポータルの<strong>ユーザー</strong>として同期します。送るのは
-        <strong>社員番号・氏名・在籍状態（退職日）</strong>と、
-        <strong>その人の管理者（承認者）</strong>だけです。
+        <strong>社員番号・氏名・在籍状態（退職日）・管理者（承認者）</strong>と、
+        <strong>所属（部署コード・職場コード）</strong>です。
         ポータルに居ない人は、パスワード未設定の招待状態でアカウントを作ります。
       </p>
       <p className="mb-3 text-xs text-[#707070]">
-        <strong>送らないもの</strong>: 生年月日・入社日・雇用体系・役職・職務・部署・職場・メール。
-        部署や工場ごとのアプリの割当、パスワード、ポータルの権限（管理者・ポータル管理）も
+        <strong>送らないもの</strong>: 生年月日・入社日・雇用体系・役職・職務・メール。
+        <strong>部署・職場そのものも作りません</strong>。所属はコードだけを送り、
+        ポータルに同じコードの部署・職場があるときだけ引き当てます。
+        アプリの割当、パスワード、ポータルの権限（管理者・ポータル管理）は
         ポータル側の運用なので触りません。
       </p>
+
+      {/* 先に部署・職場がポータルに無いと、所属が引き当たらない。
+          その順番が分かるよう、CSVの入口をここに置く。 */}
+      <div className="mb-4 rounded-lg border border-[#d9e4f5] bg-[#f5f8fd] px-3 py-3 text-xs text-[#555555]">
+        <p className="mb-2">
+          <strong>はじめにポータルの部署・職場をそろえてください。</strong>
+          ポータルに部署・職場が無いと、同期しても<strong>所属が引き当たりません</strong>。
+        </p>
+        <ol className="mb-2 ml-4 list-decimal space-y-0.5">
+          <li>下の2つのCSVを落とす</li>
+          <li>ポータルの管理画面「① 職場設定」の<strong>「CSVで一括設定」「職場CSVで一括設定」</strong>で取り込む</li>
+          <li>ポータルで各部署の<strong>表示アプリ</strong>を設定する</li>
+          <li>ここへ戻って「ポータルへ同期」を実行する</li>
+        </ol>
+        <div className="flex flex-wrap gap-3">
+          <a
+            href="/settings/portal-org-csv?kind=dept"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-1.5 font-medium text-[#2563eb] hover:bg-[#f7f7f5]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            部署CSV
+          </a>
+          <a
+            href="/settings/portal-org-csv?kind=workplace"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e5e5] bg-white px-3 py-1.5 font-medium text-[#2563eb] hover:bg-[#f7f7f5]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            職場CSV
+          </a>
+        </div>
+        <p className="mt-2 text-[#909090]">
+          部署CSVにアプリの列は入れていません。取り込み直しても<strong>アプリの割当は消えません</strong>。
+        </p>
+      </div>
       <div className="mb-4 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-xs text-[#707070]">
         <strong>管理者（承認者）の決め方</strong>: 組織を上へ辿って、自分より上位の管理者が
         最初に見つかった人です。管理者になる職務は
@@ -101,6 +137,25 @@ export default function PortalPushPanel() {
         <p className="mt-3 rounded-lg bg-[#e8f3ec] px-3 py-2 text-sm text-[#1c7a4d]">{state.message}</p>
       )}
 
+      {state.unknownCodes && (
+        <div className="mt-3 rounded-lg bg-[#fff8e8] px-3 py-2 text-xs text-[#8a6d3b]">
+          <p className="font-medium">
+            ポータルに無いコードがありました。この所属は引き当てていません。
+            上の部署CSV・職場CSVを取り込んでから、もう一度「ポータルへ同期」を実行してください。
+          </p>
+          {state.unknownCodes.departments.length > 0 && (
+            <p className="mt-1">
+              部署コード: <span className="font-mono">{state.unknownCodes.departments.join("、")}</span>
+            </p>
+          )}
+          {state.unknownCodes.workplaces.length > 0 && (
+            <p className="mt-1">
+              職場コード: <span className="font-mono">{state.unknownCodes.workplaces.join("、")}</span>
+            </p>
+          )}
+        </div>
+      )}
+
       {state.failures && state.failures.length > 0 && (
         <ul className="mt-3 space-y-1">
           {state.failures.map((f, i) => (
@@ -120,6 +175,8 @@ export default function PortalPushPanel() {
                 <th className="px-3 py-2 font-medium">社員番号</th>
                 <th className="px-3 py-2 font-medium">氏名</th>
                 <th className="px-3 py-2 font-medium">在籍</th>
+                <th className="px-3 py-2 font-medium">部署</th>
+                <th className="px-3 py-2 font-medium">職場</th>
                 <th className="px-3 py-2 font-medium">管理者（承認者）</th>
               </tr>
             </thead>
@@ -129,6 +186,8 @@ export default function PortalPushPanel() {
                   <td className="px-3 py-2 font-mono text-xs text-[#707070]">{p.loginId}</td>
                   <td className="px-3 py-2 text-[#333333]">{p.name}</td>
                   <td className="px-3 py-2 text-[#555555]">{EMPLOYMENT_STATUS_LABEL[p.status]}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#555555]">{p.departmentCode ?? "—"}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-[#555555]">{p.workplaceCode ?? "—"}</td>
                   <td className="px-3 py-2 font-mono text-xs text-[#555555]">
                     {p.managerLoginId ?? <span className="text-[#a06a12]">なし</span>}
                   </td>
