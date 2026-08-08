@@ -45,6 +45,13 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) return null;
         const sql = getSql();
         const rawId = credentials.email.trim();
+        // ポータル一本化: 一般利用者のログインはポータルの一括ログイン（/api/sso）に集約した。
+        // パスワードでの直接ログインは、ポータル・SSO障害時の復旧用に統一管理者（admin）だけ許す。
+        if (rawId.toLowerCase() !== "admin") {
+          throw new Error(
+            "ログインはポータルから行ってください。ポータルでログインすると各アプリへ自動でログインされます。"
+          );
+        }
         let rows;
         try {
           // ① 社員番号（login_id）で検索 → ②ヒットしなければメールアドレスで検索

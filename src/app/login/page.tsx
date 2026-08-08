@@ -21,10 +21,7 @@ export default function LoginPage() {
           </Suspense>
         </div>
         <p className="mt-4 text-center text-xs text-[#909090]">
-          パスワードをお忘れの場合は{" "}
-          <Link href="/password-reset" className="text-[#2563eb] hover:underline">
-            再設定
-          </Link>
+          パスワードの再設定はポータルで行います
         </p>
         <p className="mt-6 text-center text-xs text-[#909090]">
           <a href="https://portal.paloma-pf.com/" className="hover:underline">
