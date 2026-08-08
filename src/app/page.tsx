@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { Award, FileText, Network, Users } from "lucide-react";
-import { isUnconfigured, requireJinjiSession } from "@/lib/session";
+import { requireJinjiSession } from "@/lib/session";
 import { countByStatus } from "@/lib/employees";
 import { countOpenTransfers, listDueTransfers } from "@/lib/transfers";
 import { countExpiring, listQualifications } from "@/lib/qualifications";
@@ -11,7 +10,6 @@ import { getScope } from "@/lib/scope";
 import { daysUntil, todayJST } from "@/lib/dates";
 import { formatDate } from "@/lib/format";
 import { ExpiryBadge } from "@/components/Badges";
-import DbErrorState from "@/components/DbErrorState";
 import PageHeader from "@/components/PageHeader";
 import HeadcountNowTable from "@/components/HeadcountNow";
 import { EMPLOYMENT_STATUS_LABEL, TRANSFER_KIND_LABEL } from "@/lib/types";
@@ -48,20 +46,8 @@ function Stat({
 
 /** ダッシュボード。今なにをすべきかが一目で分かることを目的にしている。 */
 export default async function HomePage() {
-  // 名簿が空＝ポータルの権限が届かないときの入室の逃げ道がまだ無い。
-  // 初期セットアップへ誘導する（入室自体はポータルの管理者権限で通っている）。
-  try {
-    if (await isUnconfigured()) redirect("/setup");
-  } catch (e) {
-    // redirect() は内部的に例外を投げるため、DB エラーだけを拾う
-    if ((e as { digest?: string }).digest?.startsWith("NEXT_REDIRECT")) throw e;
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
-        <DbErrorState message={(e as Error).message} />
-      </div>
-    );
-  }
-
+  // 入室可否はポータルの権限（findGrant）で決まる。名簿が空でも初期セットアップへは誘導せず、
+  // 権限の無い人は requireJinjiSession が /forbidden へ送る。
   const s = await requireJinjiSession();
   const today = todayJST();
   const scope = await getScope(s.grant);
